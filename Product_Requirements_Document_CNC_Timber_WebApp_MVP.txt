@@ -1,0 +1,315 @@
+================================================================================
+PRODUCT REQUIREMENTS DOCUMENT (PRD)
+CNC Timber Machining Web Application – MVP
+Working Title: TimberNest (placeholder – final name TBD)
+Version: 1.0
+Date: 25 July 2026
+Status: Draft for Review
+================================================================================
+
+1. INTRODUCTION & PURPOSE
+-------------------------
+This document defines the product requirements for a web application that enables
+hobbyists to upload CAD designs, have them analysed and repaired, nested, quoted,
+and converted into production-ready G-code for CNC machining of timber (initially
+18 mm plywood).
+
+The service is inspired by SendCutSend but focused first on CNC routing of sheet
+timber, with a clear architectural path to later support laser cutting, plasma
+cutting + folding, 3D printing, vinyl cutting, and additional CNC processes.
+
+The application must provide:
+- Guided DXF/DWG analysis and repair
+- Machinability verification with visual feedback
+- Automatic dog-boning for sharp internal corners
+- Multi-part / multi-sheet nesting
+- Cycle-time-based automated quoting
+- 2D + 3D graphical representation of the design and resulting part
+- G-code generation targeted at LinuxCNC
+- Admin-configurable machines, materials, processes and pricing rules
+- Java-based backend exposing an OpenAPI-compliant API
+- Hosting on Railway
+
+2. GOALS & SUCCESS METRICS
+--------------------------
+Primary Goals (MVP)
+- Allow a hobbyist to go from DXF/DWG upload to ordered, manufacturable G-code
+  job with a clear price in a single session.
+- Produce reliable, LinuxCNC-compatible G-code for 2.5D machining of 18 mm
+  plywood sheets (2440 × 1220 mm).
+- Minimise failed jobs through automated analysis, guided repair and
+  machinability checks.
+- Provide transparent, time-based pricing that the admin can fully control.
+
+Success Metrics (MVP)
+- ≥ 80 % of uploaded files that pass initial validation can be repaired and
+  nested without manual admin intervention.
+- Average time from upload to quote < 90 seconds for typical hobbyist parts.
+- Zero silent generation of non-machinable toolpaths.
+- Admin can change material cost, machine hourly rate or tool rates and see
+  immediate effect on new quotes.
+
+3. TARGET USERS
+---------------
+Primary (MVP): Individual hobbyists building furniture, fixtures, jigs, signs,
+prototypes and other timber parts at home or in makerspaces.
+
+Secondary (post-MVP): Small workshops, professional makers, educational users,
+and later company/team accounts.
+
+4. SCOPE
+--------
+4.1 In Scope – MVP
+- Individual user accounts (email + password / magic link)
+- Upload of DXF and DWG files
+- Automated + guided repair of common geometry issues
+- Machinability analysis with visual highlighting of problems
+- Automatic dog-bone generation option for sharp internal corners
+- Multi-part and multi-sheet nesting on 2440 × 1220 mm sheets
+- 2D vector viewer + interactive 3D preview of the finished part(s)
+- Cycle-time estimation
+- Automated quoting driven by admin-configured parameters
+  (machine time, tool usage, material consumption, setup fees, etc.)
+- Quote → user review → approve-to-order workflow
+- Design versioning / up-rev capability
+- Generation of LinuxCNC-compatible G-code + basic setup information
+- Admin console to define:
+  - Machines (work envelope, available tools, feed/speed defaults, post-processor)
+  - Materials (plywood 18 mm, cost, density, stock sizes, machining parameters)
+  - Processes and process parameters
+  - Pricing rules / rate cards
+- Java backend with OpenAPI 3 specification
+- Deployment target: Railway
+
+4.2 Explicitly Prepared for (but not implemented) in MVP
+- Additional file formats (STEP, IGES, SVG, AI, PDF vector, etc.)
+- Laser cutting, plasma cutting + folding, 3D printing, vinyl cutting,
+  full 3-axis / 5-axis CNC, etc.
+- Company / team accounts and roles
+- Payments, shipping, inventory, notifications, webhooks
+- Public developer API (OpenAPI will already exist; public exposure later)
+
+4.3 Out of Scope for MVP
+- Real-time collaborative editing
+- In-browser CAD modelling from scratch
+- Automatic tool-path optimisation beyond basic 2.5D strategies
+- Physical machine integration / job sending
+- Payment processing and shipping logistics
+- Multi-language support
+- Mobile-native applications (responsive web is required)
+
+5. FUNCTIONAL REQUIREMENTS
+--------------------------
+
+5.1 User Account & Authentication
+- FR-1.1  Users can register and log in with email + password.
+- FR-1.2  Password reset and optional magic-link login.
+- FR-1.3  Basic user profile (name, contact details, default units).
+- FR-1.4  All user designs and jobs are private to the account.
+
+5.2 Design Upload & Versioning
+- FR-2.1  Accept DXF and DWG files (R12–R2018 recommended; later versions best-effort).
+- FR-2.2  File size limit (configurable, suggested initial limit 25 MB).
+- FR-2.3  On upload the system creates a new Design entity and a Version 1.
+- FR-2.4  User can upload a new version of an existing design (“up-rev”).
+- FR-2.5  Previous versions remain available for reference and re-ordering.
+
+5.3 Geometry Analysis & Guided Repair
+- FR-3.1  Parse and extract 2D geometry (lines, polylines, arcs, circles, splines
+         where possible).
+- FR-3.2  Detect and report common issues:
+         - Open contours / unclosed polylines
+         - Duplicate or overlapping entities
+         - Zero-length entities
+         - Self-intersections
+         - Extremely small features
+         - Mixed units or incorrect scale
+         - Layers / blocks that should be purged
+         - Text, dimensions, construction geometry that is irrelevant for machining
+- FR-3.3  Present issues to the user in a clear, prioritised list with visual
+         highlights on the 2D viewer.
+- FR-3.4  Offer one-click or guided “Fix” actions for each issue category.
+         User must explicitly confirm each major repair step.
+- FR-3.5  After confirmed fixes, the repaired geometry becomes the canonical
+         model stored against the Design Version. Original file is retained
+         for audit.
+- FR-3.6  System records a repair log (what was changed and why).
+
+5.4 Machinability Verification
+- FR-4.1  Analyse geometry against the selected machine + tool + material rules.
+- FR-4.2  Detect and highlight un-machinable or problematic features:
+         - Internal corners sharper than the selected tool radius
+         - Features smaller than minimum tool diameter or kerf
+         - Undercuts or non-2.5D geometry
+         - Thin walls below configurable threshold
+         - Islands that cannot be reached
+- FR-4.3  For sharp internal corners, offer an automatic dog-bone (or T-bone /
+         other variants) generation feature. User can accept, reject or adjust
+         the dog-bone parameters.
+- FR-4.4  User must acknowledge remaining warnings before proceeding to nesting
+         and quoting.
+
+5.5 Nesting
+- FR-5.1  Support multiple parts from one or more design versions in a single job.
+- FR-5.2  Automatic nesting onto one or more 2440 × 1220 mm sheets.
+- FR-5.3  Respect material grain direction if the user marks parts as grain-sensitive.
+- FR-5.4  Configurable margins, part-to-part spacing and sheet edge clearance.
+- FR-5.5  Visual preview of the nested sheets with part labels.
+- FR-5.6  Allow user to manually adjust nesting (rotate, move) within limits
+         before locking the layout for quoting.
+
+5.6 Visualisation
+- FR-6.1  Interactive 2D vector viewer showing original, repaired and nested geometry.
+- FR-6.2  Interactive 3D preview of the finished part(s) (extruded 18 mm plywood
+         with realistic material appearance).
+- FR-6.3  Optional overlay of toolpaths on both 2D and 3D views.
+- FR-6.4  Ability to measure distances and inspect feature sizes in the viewers.
+
+5.7 Quoting & Ordering
+- FR-7.1  Automated quote generation after nesting is locked.
+- FR-7.2  Quote components (all admin-configurable):
+         - Material cost (sheet usage + scrap factor)
+         - Machine time (estimated cycle time × hourly rate)
+         - Tool usage / wear charge
+         - Setup / handling fee
+         - Any process-specific surcharges
+- FR-7.3  Display transparent breakdown of the quote.
+- FR-7.4  User reviews the quote, nesting layout and warnings, then explicitly
+         approves the order.
+- FR-7.5  On approval the system generates final G-code and marks the job as
+         “Ready for Production”.
+- FR-7.6  User can re-order a previous job or a previous design version with
+         one click (re-nesting and re-quoting required if material or machine
+         parameters have changed).
+
+5.8 G-code Generation
+- FR-8.1  Produce LinuxCNC-compatible G-code (primarily G0/G1/G2/G3, tool
+         changes, spindle control, coolant if applicable).
+- FR-8.2  Support basic 2.5D strategies: profiling, pocketing, drilling,
+         engraving (as applicable to the geometry).
+- FR-8.3  Include tool list, estimated cycle time, and recommended feeds/speeds
+         in a companion setup sheet (PDF or structured text).
+- FR-8.4  G-code and setup data are downloadable by the user and stored against
+         the job for the production team.
+
+5.9 Admin Console
+- FR-9.1  Define and manage Machines:
+         - Name, work envelope (default 2440 × 1220 × Z)
+         - Available tools (diameter, type, flute count, max depth, etc.)
+         - Default feeds, speeds, stepovers
+         - Post-processor / G-code dialect (LinuxCNC first)
+- FR-9.2  Define and manage Materials:
+         - Plywood 18 mm (and future materials)
+         - Cost per sheet or per m²
+         - Density, grain behaviour, recommended tools & parameters
+         - Available stock sizes
+- FR-9.3  Define Processes and link them to machines + materials.
+- FR-9.4  Configure pricing rules and rate cards (machine hourly rate, tool
+         charges, material mark-up, minimum order value, etc.).
+- FR-9.5  View and manage incoming jobs, override quotes if necessary, mark
+         jobs as produced / shipped (shipping itself is post-MVP).
+- FR-9.6  Audit log of all admin configuration changes.
+
+6. NON-FUNCTIONAL REQUIREMENTS
+------------------------------
+- NFR-1  Performance: Typical DXF analysis + repair + initial quote < 90 s.
+- NFR-2  Scalability: Architecture must support growth to hundreds of concurrent
+        users without major redesign (Railway-friendly).
+- NFR-3  Reliability: Geometry repair and G-code generation must be deterministic
+        and logged.
+- NFR-4  Security: All user files and jobs private; secure file storage;
+        standard authentication best practices; no public exposure of raw G-code
+        generation endpoints without auth.
+- NFR-5  Usability: Guided repair flow must be understandable by non-expert
+        hobbyists. Clear visual feedback is mandatory.
+- NFR-6  Maintainability: Backend strictly OpenAPI 3 compliant; clear separation
+        of geometry engine, CAM/nesting engine, and business logic.
+- NFR-7  Extensibility: Data model and process configuration must allow addition
+        of new processes (laser, plasma, 3D print, etc.) without schema breakage.
+
+7. TECHNICAL CONSTRAINTS & ARCHITECTURE DIRECTION
+-------------------------------------------------
+- Backend: Java (Spring Boot 3.x recommended) with OpenAPI 3 (SpringDoc or
+  equivalent). All external and internal APIs documented and versioned.
+- Frontend: Modern responsive SPA (React, Vue or Svelte – final choice left to
+  implementation team). Must support both 2D canvas/WebGL vector rendering and
+  3D (Three.js or equivalent).
+- Geometry & CAM: Prefer mature open-source or commercially licensable libraries
+  that can run server-side. Exact libraries to be evaluated (candidates may
+  include OpenCASCADE wrappers, custom DXF parsers, existing nesting engines).
+- File Storage: Secure object storage (S3-compatible) for original, repaired
+  and G-code files.
+- Database: Relational (PostgreSQL recommended) for users, designs, versions,
+  jobs, admin configuration.
+- Hosting: Railway (backend, frontend, database, object storage integration).
+- Units: Millimetres internally. Display in user-preferred units.
+- Coordinate system: Consistent right-hand rule, Z-up for 3D preview.
+
+8. HIGH-LEVEL DATA MODEL (conceptual)
+-------------------------------------
+User
+Design (belongs to User)
+  └── DesignVersion (geometry, repair log, thumbnail)
+Job
+  ├── selected DesignVersion(s) / parts
+  ├── NestingLayout (sheets + placements)
+  ├── Quote (breakdown)
+  ├── GCodeArtifact
+  └── Status (Draft → Analysed → Nested → Quoted → Ordered → In Production …)
+Machine
+Material
+Tool
+Process
+PricingRule
+RepairActionLog
+AuditLog
+
+(Exact schema to be refined during technical design.)
+
+9. USER FLOWS (MVP)
+-------------------
+Happy Path
+1. User registers / logs in.
+2. Uploads DXF or DWG.
+3. System analyses → presents issues with visual highlights.
+4. User reviews and confirms each suggested fix (including optional dog-bones).
+5. Repaired model is saved as the canonical version.
+6. User adds additional parts if desired and requests nesting.
+7. System nests, shows 2D nested sheets + 3D part previews.
+8. User optionally adjusts nesting and locks layout.
+9. System calculates cycle time and generates quote.
+10. User reviews quote + warnings and approves order.
+11. System generates LinuxCNC G-code + setup sheet.
+12. Job appears in admin queue as “Ready for Production”.
+
+Alternative / Error Paths
+- Unrecoverable geometry → clear explanation and ability to download diagnostic
+  report or re-upload.
+- Machinability failures that cannot be auto-fixed → user must redesign or
+  accept limitations (with explicit acknowledgement).
+
+10. ASSUMPTIONS
+---------------
+- Initial material is limited to 18 mm plywood in 2440 × 1220 mm sheets.
+- Only 2.5D machining is required for MVP.
+- LinuxCNC is the first and primary target controller.
+- Users understand basic CNC concepts sufficiently to confirm dog-bones and
+  review warnings.
+- Admin will configure realistic feeds, speeds and pricing before launch.
+- No real-time machine feedback or job tracking beyond status flags in MVP.
+
+11. OPEN QUESTIONS / FUTURE DECISIONS
+-------------------------------------
+- Exact geometry / CAM / nesting library selection.
+- Dog-bone style defaults and parameter UI.
+- Whether to expose a limited public API in a later phase or keep it internal.
+- Branding, final product name and visual identity.
+- Detailed toolpath strategy library (climb vs conventional, tabs, lead-ins, etc.).
+
+12. DOCUMENT CONTROL
+--------------------
+This PRD is the single source of truth for MVP scope.
+Any change to scope requires an update to this document and stakeholder agreement.
+
+End of Product Requirements Document
+================================================================================

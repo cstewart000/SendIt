@@ -1,0 +1,15 @@
+backend/build/
+backend/.gradle/
+backend/storage/
+frontend/node_modules/
+frontend/dist/
+storage/
+*.log
+.idea/
+*.iml
+.DS_Store
+.env
+.env.*
+!.env.example
+*.ngc
+**/job-*-setup.txt

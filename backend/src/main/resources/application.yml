@@ -1,0 +1,38 @@
+server:
+  port: ${PORT:8081}
+
+spring:
+  application:
+    name: sendit
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5435/timbernest}
+    username: ${DATABASE_USER:timbernest}
+    password: ${DATABASE_PASSWORD:timbernest}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+  servlet:
+    multipart:
+      max-file-size: ${FILE_MAX_MB:25}MB
+      max-request-size: ${FILE_MAX_MB:25}MB
+
+sendit:
+  jwt-secret: ${JWT_SECRET:sendit-dev-secret-change-me-32chars!!!!}
+  jwt-expiry-hours: 72
+  storage-path: ${STORAGE_PATH:./storage}
+  file-max-mb: ${FILE_MAX_MB:25}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    com.timbernest: INFO
