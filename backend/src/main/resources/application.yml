@@ -12,10 +12,12 @@ spring:
     hibernate:
       ddl-auto: update
     open-in-view: false
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     properties:
       hibernate:
         jdbc:
           time_zone: UTC
+
   servlet:
     multipart:
       max-file-size: ${FILE_MAX_MB:25}MB

@@ -3,6 +3,6 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-healthcheckPath = "/v3/api-docs"
+healthcheckPath = "/api/v1/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"

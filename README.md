@@ -50,10 +50,16 @@ http://localhost:8081/swagger-ui.html
 5. Download `.ngc` G-code + setup sheet
 6. Admin can edit pricing and advance job status
 
-## Railway notes
-- Add PostgreSQL plugin; set `DATABASE_URL`, `DATABASE_USER`, `DATABASE_PASSWORD`
-- Set `JWT_SECRET`, `PORT`, `STORAGE_PATH` (or migrate to S3-compatible storage)
-- Deploy backend + static frontend (or separate frontend service with `VITE_API_BASE_URL`)
+## Production (Railway)
+- App: https://frontend-production-17e71.up.railway.app
+- API: https://backend-production-df5b.up.railway.app
+- Project services: `frontend` (Nginx + SPA), `backend` (Spring Boot), `Postgres`
+- Frontend proxies `/api` to backend over Railway private networking
+- Redeploy from CLI:
+  ```bash
+  railway up ./backend --path-as-root --service backend --ci -y
+  railway up ./frontend --path-as-root --service frontend --ci -y
+  ```
 
 ## Phase 1 limits
 DWG native parse, payments, shipping, pocketing/drill CAM, and public API are out of scope.
