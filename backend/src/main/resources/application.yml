@@ -5,9 +5,9 @@ spring:
   application:
     name: sendit
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5435/timbernest}
-    username: ${DATABASE_USER:timbernest}
-    password: ${DATABASE_PASSWORD:timbernest}
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5435/timbernest}
+    username: ${PGUSER:${DATABASE_USER:timbernest}}
+    password: ${PGPASSWORD:${DATABASE_PASSWORD:timbernest}}
   jpa:
     hibernate:
       ddl-auto: update
