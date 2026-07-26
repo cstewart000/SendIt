@@ -36,6 +36,11 @@ public class JobController {
         return jobs.get(user, id);
     }
 
+    @GetMapping("/{id}/nest-shapes")
+    public List<JobDtos.NestShape> nestShapes(@AuthenticationPrincipal AppUser user, @PathVariable Long id) {
+        return workflow.nestShapes(user, id);
+    }
+
     @PostMapping("/{id}/parts")
     public JobDtos.JobView addPart(@AuthenticationPrincipal AppUser user, @PathVariable Long id,
                                    @RequestBody JobDtos.AddPartRequest req) {

@@ -24,6 +24,14 @@ public final class JobDtos {
 
     public record AdjustNestRequest(List<NestPlacement> placements) {}
 
+    public record Pt(double x, double y) {}
+
+    public record ContourPath(boolean closed, List<Pt> points) {}
+
+    /** Part outline for nest preview (points relative to bbox min / native origin). */
+    public record NestShape(Long jobPartId, double nativeWidth, double nativeHeight,
+                            List<ContourPath> contours) {}
+
     public record JobView(Long id, JobStatus status, Long machineId, Long materialId, Long toolId,
                           boolean nestingLocked, double marginMm, double partGapMm,
                           List<JobPart> parts, Map<String, Object> nesting, Map<String, Object> quote,

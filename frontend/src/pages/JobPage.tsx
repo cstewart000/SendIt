@@ -4,6 +4,7 @@ import { api, apiBlob } from '../api/client'
 import { Shell } from '../components/Shell'
 import { PartPicker, type PartSelection } from '../components/PartPicker'
 import { NestEditor } from '../components/viewer2d/NestEditor'
+import type { NestShape } from '../components/viewer2d/nestDraw'
 import type { NestPlacement } from '../components/viewer2d/nestMath'
 
 type JobPart = {
@@ -30,9 +31,22 @@ export function JobPage() {
   const [selection, setSelection] = useState<PartSelection>({})
   const [allQty, setAllQty] = useState(1)
   const [error, setError] = useState('')
+  const [shapes, setShapes] = useState<Record<number, NestShape>>({})
   const nestSave = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  async function reload() { setJob(await api<Job>(`/jobs/${id}`)) }
+  async function loadShapes() {
+    const list = await api<NestShape[]>(`/jobs/${id}/nest-shapes`)
+    const map: Record<number, NestShape> = {}
+    list.forEach(s => { map[s.jobPartId] = s })
+    setShapes(map)
+    console.log('[job] nest shapes', list.length)
+  }
+
+  async function reload() {
+    const j = await api<Job>(`/jobs/${id}`)
+    setJob(j)
+    if (j.parts?.length) await loadShapes().catch(console.error)
+  }
 
   useEffect(() => {
     reload().catch(e => setError(e.message))
@@ -54,6 +68,7 @@ export function JobPage() {
     setJob(await api<Job>(`/jobs/${id}/parts`, {
       method: 'POST', body: JSON.stringify({ designVersionId: versionId, quantities }),
     }))
+    await loadShapes().catch(console.error)
   }
 
   async function setJobPartQty(jobPartId: number, quantity: number) {
@@ -110,6 +125,7 @@ export function JobPage() {
             <NestEditor
               sheet={{ width: job.nesting.sheetWidth, height: job.nesting.sheetHeight }}
               placements={job.nesting.placements || []}
+              shapes={shapes}
               locked={job.nestingLocked}
               onChange={onNestChange}
             />

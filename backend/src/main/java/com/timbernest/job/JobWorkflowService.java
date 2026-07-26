@@ -64,7 +64,10 @@ public class JobWorkflowService {
         Job job = jobs.owned(user, jobId);
         Material mat = materials.findById(job.getMaterialId())
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Material missing"));
-        NestResult result = nesting.nest(parts.findByJobId(jobId), mat.getSheetWidthMm(),
+        List<JobPart> jobParts = parts.findByJobId(jobId);
+        Map<Long, GeometryModel> geos = new HashMap<>();
+        for (JobPart p : jobParts) geos.put(p.getId(), loadModel(user, p));
+        NestResult result = nesting.nest(jobParts, geos, mat.getSheetWidthMm(),
                 mat.getSheetHeightMm(), job.getMarginMm(), job.getPartGapMm());
         job.setNestingJson(jobs.writeJson(result));
         job.setStatus(JobStatus.NESTED);
@@ -141,22 +144,56 @@ public class JobWorkflowService {
         return Files.readAllBytes(storage.resolve(path));
     }
 
+    /** Localized outlines for nest canvas (one per job part type). */
+    public List<JobDtos.NestShape> nestShapes(AppUser user, Long jobId) {
+        jobs.owned(user, jobId);
+        List<JobDtos.NestShape> out = new ArrayList<>();
+        for (JobPart p : parts.findByJobId(jobId)) {
+            GeometryModel model = loadModel(user, p);
+            out.add(toNestShape(p, model));
+        }
+        log.info("Nest shapes for job {}: {}", jobId, out.size());
+        return out;
+    }
+
     private List<GeometryModel> geometries(AppUser user, Long jobId) {
         List<GeometryModel> list = new ArrayList<>();
         for (JobPart p : parts.findByJobId(jobId)) {
-            DesignVersion v = versions.findById(p.getDesignVersionId()).orElseThrow();
-            designAccess.ownedVersion(user, v.getDesignId(), v.getId());
-            GeometryModel model;
-            if (p.getDesignPartId() != null) {
-                DesignPart dp = designParts.findById(p.getDesignPartId())
-                        .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Design part missing"));
-                model = json.toModel(dp.getGeometryJson());
-            } else {
-                model = designAccess.loadOrParse(v);
-            }
+            GeometryModel model = loadModel(user, p);
             for (int i = 0; i < p.getQuantity(); i++) list.add(model);
         }
         return list;
+    }
+
+    private GeometryModel loadModel(AppUser user, JobPart p) {
+        DesignVersion v = versions.findById(p.getDesignVersionId()).orElseThrow();
+        designAccess.ownedVersion(user, v.getDesignId(), v.getId());
+        if (p.getDesignPartId() != null) {
+            DesignPart dp = designParts.findById(p.getDesignPartId())
+                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Design part missing"));
+            return json.toModel(dp.getGeometryJson());
+        }
+        return designAccess.loadOrParse(v);
+    }
+
+    private JobDtos.NestShape toNestShape(JobPart p, GeometryModel model) {
+        double minX = Double.POSITIVE_INFINITY, minY = Double.POSITIVE_INFINITY;
+        for (var c : model.getContours()) {
+            for (var pt : c.getPoints()) {
+                minX = Math.min(minX, pt.x());
+                minY = Math.min(minY, pt.y());
+            }
+        }
+        if (!Double.isFinite(minX)) { minX = 0; minY = 0; }
+        List<JobDtos.ContourPath> paths = new ArrayList<>();
+        for (var c : model.getContours()) {
+            List<JobDtos.Pt> pts = new ArrayList<>();
+            for (var pt : c.getPoints()) {
+                pts.add(new JobDtos.Pt(pt.x() - minX, pt.y() - minY));
+            }
+            if (!pts.isEmpty()) paths.add(new JobDtos.ContourPath(c.isClosed(), pts));
+        }
+        return new JobDtos.NestShape(p.getId(), p.getWidthMm(), p.getHeightMm(), paths);
     }
 
     private NestResult readNest(Job job) {

@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
-import { applyRotation, syncOrientation, type NestPlacement } from './nestMath'
+import { applyRotation, type NestPlacement } from './nestMath'
+import { drawNestPart, type NestShape } from './nestDraw'
 
 type Props = {
   sheet: { width: number; height: number }
   placements: NestPlacement[]
+  shapes?: Record<number, NestShape>
   locked?: boolean
   onChange?: (next: NestPlacement[]) => void
 }
@@ -12,7 +14,7 @@ type Drag =
   | { mode: 'move'; i: number; ox: number; oy: number; px: number; py: number }
   | { mode: 'rotate'; i: number; cx: number; cy: number; start: number; base: number }
 
-export function NestEditor({ sheet, placements, locked, onChange }: Props) {
+export function NestEditor({ sheet, placements, shapes = {}, locked, onChange }: Props) {
   const ref = useRef<HTMLCanvasElement>(null)
   const [sel, setSel] = useState<number | null>(null)
   const drag = useRef<Drag | null>(null)
@@ -34,28 +36,11 @@ export function NestEditor({ sheet, placements, locked, onChange }: Props) {
     c.strokeStyle = '#6b5238'
     c.strokeRect(tx(0), ty(sheet.height), sheet.width * s, sheet.height * s)
     placements.filter(p => (p.sheetIndex || 0) === 0).forEach((n, i) => {
-      const rot = ((n.rotationDeg || 0) * Math.PI) / 180
-      const cx = n.x + n.width / 2, cy = n.y + n.height / 2
-      const bw = n.nativeWidth || n.width, bh = n.nativeHeight || n.height
-      c.save()
-      c.translate(tx(cx), ty(cy))
-      c.rotate(-rot)
-      c.fillStyle = i === sel ? 'rgba(224,194,154,0.35)' : 'rgba(201,133,58,0.2)'
-      c.strokeStyle = i === sel ? '#e0c29a' : '#c9853a'
-      c.fillRect((-bw / 2) * s, (-bh / 2) * s, bw * s, bh * s)
-      c.strokeRect((-bw / 2) * s, (-bh / 2) * s, bw * s, bh * s)
-      c.fillStyle = '#f3ebe1'
-      c.fillText(n.label || 'Part', (-bw / 2) * s + 4, (-bh / 2) * s + 14)
-      if (i === sel && !locked) {
-        c.beginPath()
-        c.arc((bw / 2) * s, (-bh / 2) * s, 6, 0, Math.PI * 2)
-        c.fillStyle = '#c9853a'
-        c.fill()
-      }
-      c.restore()
+      const shape = n.jobPartId != null ? shapes[n.jobPartId] : undefined
+      drawNestPart(c, n, shape, s, tx, ty, i === sel, i === sel && !locked)
     })
-    console.log('[nest] draw', placements.length, 'sel', sel)
-  }, [sheet, placements, sel, locked])
+    console.log('[nest] draw parts', placements.length, 'shapes', Object.keys(shapes).length)
+  }, [sheet, placements, shapes, sel, locked])
 
   function world(e: PointerEvent) {
     const canvas = ref.current!
@@ -77,9 +62,8 @@ export function NestEditor({ sheet, placements, locked, onChange }: Props) {
   }
 
   function setRot(list: NestPlacement[], i: number, deg: number) {
-    const p = list[i]
-    return p.jobPartId != null ? syncOrientation(list, p.jobPartId, deg)
-      : list.map((pl, j) => (j === i ? applyRotation(pl, deg) : pl))
+    // Per-instance rotation (auto-nest may use one-up/one-down pairs).
+    return list.map((pl, j) => (j === i ? applyRotation(pl, deg) : pl))
   }
 
   function onDown(e: PointerEvent) {
@@ -125,7 +109,7 @@ export function NestEditor({ sheet, placements, locked, onChange }: Props) {
       {!locked && (
         <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <button type="button" className="ghost" disabled={sel == null} onClick={rotate90}>Rotate 90°</button>
-          <span className="muted">Drag move · corner handle rotates (snaps ~90°) · shared per part type</span>
+          <span className="muted">Drag move · corner handle rotates (per piece)</span>
         </div>
       )}
     </div>
