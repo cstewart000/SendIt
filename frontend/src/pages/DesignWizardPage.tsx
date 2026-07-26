@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Shell } from '../components/Shell'
+import { PartPicker, type DesignPart } from '../components/PartPicker'
 import { Viewer2D } from '../components/viewer2d/Viewer2D'
 import { Viewer3D } from '../components/viewer3d/Viewer3D'
 
 type Version = {
-  id: number; versionNumber: number; analysed: boolean; repaired: boolean
-  warningsAcknowledged: boolean
+  id: number; analysed: boolean; partCount?: number
   geometry?: { contours: { id?: string; closed?: boolean; points: { x: number; y: number }[] }[] }
-  issues?: { id: string; category: string; severity: string; message: string; autoFixable: boolean; highlight?: { x: number; y: number }[] }[]
+  issues?: { id: string; category: string; severity: string; message: string; highlight?: { x: number; y: number }[] }[]
 }
 type Detail = { id: number; name: string; versions: Version[] }
 type Catalog = { machines: { id: number }[]; materials: { id: number }[]; tools: { id: number }[] }
@@ -29,8 +29,10 @@ export function DesignWizardPage() {
   const [step, setStep] = useState(0)
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [machIssues, setMachIssues] = useState<Version['issues']>([])
+  const [parts, setParts] = useState<DesignPart[]>([])
+  const [selected, setSelected] = useState<number[]>([])
+  const [qty, setQty] = useState(1)
   const [error, setError] = useState('')
-
   const version = detail?.versions[0]
 
   async function reload() {
@@ -63,26 +65,14 @@ export function DesignWizardPage() {
     if (!version || !catalog) return
     const issues = await api<Version['issues']>(`/designs/${id}/versions/${version.id}/machinability`, {
       method: 'POST',
-      body: JSON.stringify({
-        toolId: catalog.tools[0].id, materialId: catalog.materials[0].id,
-      }),
+      body: JSON.stringify({ toolId: catalog.tools[0].id, materialId: catalog.materials[0].id }),
     })
     setMachIssues(issues || [])
     setStep(2)
   }
 
-  async function dogbones() {
-    if (!version || !catalog) return
-    await api(`/designs/${id}/versions/${version.id}/dogbones`, {
-      method: 'POST',
-      body: JSON.stringify({ toolId: catalog.tools[0].id, scale: 1 }),
-    })
-    await reload()
-    await runMachinability()
-  }
-
   async function continueToJob() {
-    if (!version || !catalog) return
+    if (!version || !catalog || !selected.length) return
     await api(`/designs/${id}/versions/${version.id}/acknowledge-warnings`, {
       method: 'POST', body: JSON.stringify({ acknowledge: true }),
     })
@@ -96,18 +86,22 @@ export function DesignWizardPage() {
     })
     await api(`/jobs/${job.id}/parts`, {
       method: 'POST',
-      body: JSON.stringify({ designVersionId: version.id, label: detail?.name, quantity: 1 }),
+      body: JSON.stringify({ designVersionId: version.id, partIds: selected, quantity: qty }),
     })
     nav(`/jobs/${job.id}`)
   }
 
+  const highlight = useMemo(
+    () => parts.filter(p => selected.includes(p.id)).flatMap(p => p.geometry?.contours || []),
+    [parts, selected],
+  )
   const contours = version?.geometry?.contours || []
   const issues = step >= 2 ? machIssues : version?.issues || []
 
   return (
     <Shell>
       <div className="steps">
-        {['Upload', 'Repair', 'Machinability', 'Nest & quote'].map((s, i) => (
+        {['Upload', 'Repair', 'Parts & job'].map((s, i) => (
           <span key={s} className={i === step ? 'on' : ''}>{s}</span>
         ))}
       </div>
@@ -115,31 +109,36 @@ export function DesignWizardPage() {
       <div className="grid two">
         <div className="panel">
           <h2>{detail?.name || 'Design'}</h2>
-          <Viewer2D contours={contours} issues={issues} />
-          <div style={{ marginTop: '1rem' }}><Viewer3D contours={contours} /></div>
+          <Viewer2D contours={highlight.length ? highlight : contours} issues={issues} />
+          <div style={{ marginTop: '1rem' }}>
+            <Viewer3D contours={highlight.length ? highlight : contours} />
+          </div>
         </div>
         <div className="panel grid">
           {step <= 1 && (
             <>
               <h3>Guided repair</h3>
-              <p className="muted">Confirm each fix. Original file is retained.</p>
               {(version?.issues || []).map(i => (
                 <div key={i.id} className={`issue ${i.severity}`}>{i.category}: {i.message}</div>
               ))}
               {FIXES.map(([code, label]) => (
                 <button key={code} className="ghost" onClick={() => repair(code)}>{label}</button>
               ))}
-              <button onClick={() => { setStep(2); runMachinability() }}>Continue to machinability</button>
+              <button onClick={() => { setStep(2); runMachinability() }}>Continue to parts</button>
             </>
           )}
-          {step === 2 && (
+          {step === 2 && version && (
             <>
-              <h3>Machinability</h3>
-              {(machIssues || []).map(i => (
-                <div key={i.id} className={`issue ${i.severity}`}>{i.category}: {i.message}</div>
-              ))}
-              <button className="ghost" onClick={dogbones}>Apply dog-bones</button>
-              <button onClick={continueToJob}>Acknowledge & create job</button>
+              <h3>Select parts for job</h3>
+              <p className="muted">{version.partCount ?? parts.length} nestable part(s). Pick one, many, or all.</p>
+              <PartPicker designId={id!} versionId={version.id} selected={selected}
+                onChange={setSelected} onPartsLoaded={setParts} />
+              <label>Quantity per part
+                <input type="number" min={1} value={qty} onChange={e => setQty(Number(e.target.value) || 1)} />
+              </label>
+              <button onClick={continueToJob} disabled={!selected.length}>
+                Create job with {selected.length} part(s) × {qty}
+              </button>
             </>
           )}
         </div>

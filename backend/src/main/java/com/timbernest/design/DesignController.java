@@ -88,4 +88,10 @@ public class DesignController {
         this.versionRepo.save(v);
         return Map.of("warningsAcknowledged", true, "versionId", vid);
     }
+
+    @GetMapping("/{id}/versions/{vid}/parts")
+    public List<DesignDtos.PartDto> parts(@AuthenticationPrincipal AppUser user,
+                                          @PathVariable Long id, @PathVariable Long vid) {
+        return designs.listParts(user, id, vid);
+    }
 }

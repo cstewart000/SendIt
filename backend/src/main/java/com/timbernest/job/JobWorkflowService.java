@@ -6,8 +6,11 @@ import com.timbernest.cam.SetupSheetWriter;
 import com.timbernest.common.ApiException;
 import com.timbernest.common.JobStatus;
 import com.timbernest.design.DesignAccess;
+import com.timbernest.design.DesignPart;
+import com.timbernest.design.DesignPartRepository;
 import com.timbernest.design.DesignVersion;
 import com.timbernest.design.DesignVersionRepository;
+import com.timbernest.geometry.JsonUtil;
 import com.timbernest.geometry.model.GeometryModel;
 import com.timbernest.nesting.NestPlacement;
 import com.timbernest.nesting.NestResult;
@@ -34,7 +37,9 @@ public class JobWorkflowService {
     private final ToolRepository tools;
     private final PricingRuleRepository pricing;
     private final DesignVersionRepository versions;
+    private final DesignPartRepository designParts;
     private final DesignAccess designAccess;
+    private final JsonUtil json;
     private final NestingService nesting;
     private final QuoteService quotes;
     private final GCodeGenerator gcode;
@@ -44,13 +49,15 @@ public class JobWorkflowService {
     public JobWorkflowService(JobService jobs, JobRepository jobRepo, JobPartRepository parts,
                               MachineRepository machines, MaterialRepository materials,
                               ToolRepository tools, PricingRuleRepository pricing,
-                              DesignVersionRepository versions, DesignAccess designAccess,
-                              NestingService nesting, QuoteService quotes, GCodeGenerator gcode,
+                              DesignVersionRepository versions, DesignPartRepository designParts,
+                              DesignAccess designAccess, JsonUtil json, NestingService nesting,
+                              QuoteService quotes, GCodeGenerator gcode,
                               SetupSheetWriter setupSheets, FileStorageService storage) {
         this.jobs = jobs; this.jobRepo = jobRepo; this.parts = parts; this.machines = machines;
         this.materials = materials; this.tools = tools; this.pricing = pricing;
-        this.versions = versions; this.designAccess = designAccess; this.nesting = nesting;
-        this.quotes = quotes; this.gcode = gcode; this.setupSheets = setupSheets; this.storage = storage;
+        this.versions = versions; this.designParts = designParts; this.designAccess = designAccess;
+        this.json = json; this.nesting = nesting; this.quotes = quotes; this.gcode = gcode;
+        this.setupSheets = setupSheets; this.storage = storage;
     }
 
     public JobDtos.JobView nest(AppUser user, Long jobId) {
@@ -135,7 +142,15 @@ public class JobWorkflowService {
         for (JobPart p : parts.findByJobId(jobId)) {
             DesignVersion v = versions.findById(p.getDesignVersionId()).orElseThrow();
             designAccess.ownedVersion(user, v.getDesignId(), v.getId());
-            for (int i = 0; i < p.getQuantity(); i++) list.add(designAccess.loadOrParse(v));
+            GeometryModel model;
+            if (p.getDesignPartId() != null) {
+                DesignPart dp = designParts.findById(p.getDesignPartId())
+                        .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Design part missing"));
+                model = json.toModel(dp.getGeometryJson());
+            } else {
+                model = designAccess.loadOrParse(v);
+            }
+            for (int i = 0; i < p.getQuantity(); i++) list.add(model);
         }
         return list;
     }

@@ -3,6 +3,7 @@ package com.timbernest.machinability;
 import com.timbernest.admin.*;
 import com.timbernest.common.ApiException;
 import com.timbernest.design.DesignAccess;
+import com.timbernest.design.DesignPartSync;
 import com.timbernest.design.DesignVersion;
 import com.timbernest.design.DesignVersionRepository;
 import com.timbernest.geometry.JsonUtil;
@@ -26,12 +27,15 @@ public class MachinabilityController {
     private final ToolRepository tools;
     private final MaterialRepository materials;
     private final JsonUtil json;
+    private final DesignPartSync partSync;
 
     public MachinabilityController(DesignAccess access, DesignVersionRepository versions,
                                    MachinabilityService machinability, DogBoneService dogBones,
-                                   ToolRepository tools, MaterialRepository materials, JsonUtil json) {
+                                   ToolRepository tools, MaterialRepository materials, JsonUtil json,
+                                   DesignPartSync partSync) {
         this.access = access; this.versions = versions; this.machinability = machinability;
         this.dogBones = dogBones; this.tools = tools; this.materials = materials; this.json = json;
+        this.partSync = partSync;
     }
 
     @PostMapping("/machinability")
@@ -61,6 +65,7 @@ public class MachinabilityController {
         v.setGeometryJson(json.toJson(model));
         v.setRepaired(true);
         versions.save(v);
+        partSync.sync(v.getId(), model);
         return Map.of("dogBonesAdded", n, "geometry", model);
     }
 }

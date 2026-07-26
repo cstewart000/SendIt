@@ -3,15 +3,17 @@ package com.timbernest.job;
 import tools.jackson.databind.ObjectMapper;
 import com.timbernest.common.ApiException;
 import com.timbernest.design.DesignAccess;
+import com.timbernest.design.DesignPart;
+import com.timbernest.design.DesignPartRepository;
 import com.timbernest.design.DesignVersion;
 import com.timbernest.design.DesignVersionRepository;
-import com.timbernest.geometry.model.GeometryModel;
 import com.timbernest.user.AppUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -21,16 +23,14 @@ public class JobService {
     private final JobRepository jobs;
     private final JobPartRepository parts;
     private final DesignVersionRepository versions;
+    private final DesignPartRepository designParts;
     private final DesignAccess designAccess;
     private final ObjectMapper mapper;
 
     public JobService(JobRepository jobs, JobPartRepository parts, DesignVersionRepository versions,
-                      DesignAccess designAccess, ObjectMapper mapper) {
-        this.jobs = jobs;
-        this.parts = parts;
-        this.versions = versions;
-        this.designAccess = designAccess;
-        this.mapper = mapper;
+                      DesignPartRepository designParts, DesignAccess designAccess, ObjectMapper mapper) {
+        this.jobs = jobs; this.parts = parts; this.versions = versions;
+        this.designParts = designParts; this.designAccess = designAccess; this.mapper = mapper;
     }
 
     public JobDtos.JobView create(AppUser user, JobDtos.CreateJobRequest req) {
@@ -60,19 +60,38 @@ public class JobService {
         DesignVersion v = versions.findById(req.designVersionId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Version not found"));
         designAccess.ownedVersion(user, v.getDesignId(), v.getId());
-        GeometryModel model = designAccess.loadOrParse(v);
-        JobPart part = new JobPart();
-        part.setJobId(jobId);
-        part.setDesignVersionId(v.getId());
-        part.setLabel(req.label() == null ? "Part" : req.label());
-        part.setQuantity(req.quantity() == null ? 1 : req.quantity());
-        part.setGrainSensitive(Boolean.TRUE.equals(req.grainSensitive()));
-        part.setWidthMm(Math.max(1, model.width()));
-        part.setHeightMm(Math.max(1, model.height()));
-        parts.save(part);
+        List<DesignPart> selected = resolveParts(v.getId(), req.partIds());
+        if (selected.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "No nestable parts on this design version");
+        }
+        int qty = req.quantity() == null ? 1 : Math.max(1, req.quantity());
+        boolean grain = Boolean.TRUE.equals(req.grainSensitive());
+        for (DesignPart dp : selected) {
+            JobPart part = new JobPart();
+            part.setJobId(jobId);
+            part.setDesignVersionId(v.getId());
+            part.setDesignPartId(dp.getId());
+            part.setLabel(req.label() != null && selected.size() == 1 ? req.label() : dp.getLabel());
+            part.setQuantity(qty);
+            part.setGrainSensitive(grain);
+            part.setWidthMm(dp.getWidthMm());
+            part.setHeightMm(dp.getHeightMm());
+            parts.save(part);
+        }
         job.touch();
         jobs.save(job);
+        log.info("Added {} design parts x{} to job {}", selected.size(), qty, jobId);
         return view(job);
+    }
+
+    private List<DesignPart> resolveParts(Long versionId, List<Long> partIds) {
+        List<DesignPart> all = designParts.findByDesignVersionIdOrderByPartIndexAsc(versionId);
+        if (partIds == null || partIds.isEmpty()) return all;
+        List<DesignPart> out = new ArrayList<>();
+        for (DesignPart p : all) {
+            if (partIds.contains(p.getId())) out.add(p);
+        }
+        return out;
     }
 
     public Job owned(AppUser user, Long id) {

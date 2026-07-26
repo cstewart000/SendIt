@@ -9,13 +9,17 @@ import java.util.List;
 public final class DesignDtos {
     private DesignDtos() {}
 
-    public record DesignSummary(Long id, String name, Instant updatedAt, int latestVersion) {}
+    public record DesignSummary(Long id, String name, Instant updatedAt, int latestVersion,
+                                int partCount) {}
 
     public record VersionDto(Long id, int versionNumber, String originalFilename, boolean analysed,
                              boolean repaired, boolean warningsAcknowledged, Instant createdAt,
-                             GeometryModel geometry, List<GeoIssue> issues) {}
+                             GeometryModel geometry, List<GeoIssue> issues, int partCount) {}
 
     public record DesignDetail(Long id, String name, List<VersionDto> versions) {}
+
+    public record PartDto(Long id, int partIndex, String label, String contourId,
+                          double widthMm, double heightMm, GeometryModel geometry) {}
 
     public record RepairRequest(boolean confirm) {}
 

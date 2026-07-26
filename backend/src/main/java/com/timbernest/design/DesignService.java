@@ -4,7 +4,6 @@ import com.timbernest.common.ApiException;
 import com.timbernest.geometry.GeometryAnalyser;
 import com.timbernest.geometry.GeometryRepairer;
 import com.timbernest.geometry.JsonUtil;
-import com.timbernest.geometry.model.GeoIssue;
 import com.timbernest.geometry.model.GeometryModel;
 import com.timbernest.storage.FileStorageService;
 import com.timbernest.user.AppUser;
@@ -21,28 +20,32 @@ public class DesignService {
     private static final Logger log = LoggerFactory.getLogger(DesignService.class);
     private final DesignRepository designs;
     private final DesignVersionRepository versions;
+    private final DesignPartRepository designParts;
     private final RepairActionLogRepository repairLogs;
     private final FileStorageService storage;
     private final GeometryAnalyser analyser;
     private final GeometryRepairer repairer;
     private final JsonUtil json;
     private final DesignAccess access;
+    private final DesignPartSync partSync;
 
     public DesignService(DesignRepository designs, DesignVersionRepository versions,
-                         RepairActionLogRepository repairLogs, FileStorageService storage,
-                         GeometryAnalyser analyser, GeometryRepairer repairer,
-                         JsonUtil json, DesignAccess access) {
-        this.designs = designs; this.versions = versions; this.repairLogs = repairLogs;
-        this.storage = storage; this.analyser = analyser; this.repairer = repairer;
-        this.json = json; this.access = access;
+                         DesignPartRepository designParts, RepairActionLogRepository repairLogs,
+                         FileStorageService storage, GeometryAnalyser analyser,
+                         GeometryRepairer repairer, JsonUtil json, DesignAccess access,
+                         DesignPartSync partSync) {
+        this.designs = designs; this.versions = versions; this.designParts = designParts;
+        this.repairLogs = repairLogs; this.storage = storage; this.analyser = analyser;
+        this.repairer = repairer; this.json = json; this.access = access; this.partSync = partSync;
     }
 
     public List<DesignDtos.DesignSummary> list(AppUser user) {
         return designs.findByOwnerIdOrderByUpdatedAtDesc(user.getId()).stream()
                 .map(d -> {
-                    int v = versions.findTopByDesignIdOrderByVersionNumberDesc(d.getId())
-                            .map(DesignVersion::getVersionNumber).orElse(0);
-                    return new DesignDtos.DesignSummary(d.getId(), d.getName(), d.getUpdatedAt(), v);
+                    var top = versions.findTopByDesignIdOrderByVersionNumberDesc(d.getId());
+                    int v = top.map(DesignVersion::getVersionNumber).orElse(0);
+                    int parts = top.map(tv -> (int) designParts.countByDesignVersionId(tv.getId())).orElse(0);
+                    return new DesignDtos.DesignSummary(d.getId(), d.getName(), d.getUpdatedAt(), v, parts);
                 }).toList();
     }
 
@@ -78,12 +81,12 @@ public class DesignService {
     public DesignDtos.VersionDto analyse(AppUser user, Long designId, Long versionId) {
         DesignVersion v = access.ownedVersion(user, designId, versionId);
         GeometryModel model = access.loadOrParse(v);
-        List<GeoIssue> issues = analyser.analyse(model);
         v.setGeometryJson(json.toJson(model));
-        v.setIssuesJson(json.toJson(issues));
+        v.setIssuesJson(json.toJson(analyser.analyse(model)));
         v.setAnalysed(true);
         versions.save(v);
-        log.info("Analysed designVersionId={} issues={}", v.getId(), issues.size());
+        partSync.sync(v.getId(), model);
+        log.info("Analysed designVersionId={}", v.getId());
         return toVersion(v);
     }
 
@@ -98,9 +101,16 @@ public class DesignService {
         v.setRepaired(true);
         v.setRepairedPath(storage.writeText("repaired", "v" + v.getId() + ".json", v.getGeometryJson()));
         versions.save(v);
+        partSync.sync(v.getId(), model);
         repairLogs.save(RepairActionLog.of(v.getId(), action, reason));
         log.info("Repair {} on version {}: {}", action, v.getId(), reason);
         return toVersion(v);
+    }
+
+    public List<DesignDtos.PartDto> listParts(AppUser user, Long designId, Long versionId) {
+        access.ownedVersion(user, designId, versionId);
+        return designParts.findByDesignVersionIdOrderByPartIndexAsc(versionId).stream()
+                .map(this::toPart).toList();
     }
 
     private DesignVersion createVersion(Design d, MultipartFile file, int num) {
@@ -124,8 +134,14 @@ public class DesignService {
 
     DesignDtos.VersionDto toVersion(DesignVersion v) {
         GeometryModel g = v.getGeometryJson() == null ? null : json.toModel(v.getGeometryJson());
+        int count = (int) designParts.countByDesignVersionId(v.getId());
         return new DesignDtos.VersionDto(v.getId(), v.getVersionNumber(), v.getOriginalFilename(),
                 v.isAnalysed(), v.isRepaired(), v.isWarningsAcknowledged(), v.getCreatedAt(),
-                g, json.toIssues(v.getIssuesJson()));
+                g, json.toIssues(v.getIssuesJson()), count);
+    }
+
+    DesignDtos.PartDto toPart(DesignPart p) {
+        return new DesignDtos.PartDto(p.getId(), p.getPartIndex(), p.getLabel(), p.getContourId(),
+                p.getWidthMm(), p.getHeightMm(), json.toModel(p.getGeometryJson()));
     }
 }

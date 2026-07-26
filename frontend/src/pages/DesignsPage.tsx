@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api/client'
 import { Shell } from '../components/Shell'
 
-type Design = { id: number; name: string; latestVersion: number; updatedAt: string }
+type Design = { id: number; name: string; latestVersion: number; updatedAt: string; partCount?: number }
 
 export function DesignsPage() {
   const [items, setItems] = useState<Design[]>([])
@@ -39,7 +39,7 @@ export function DesignsPage() {
             {items.map(d => (
               <Link key={d.id} to={`/designs/${d.id}`} className="issue">
                 <strong>{d.name}</strong>
-                <div className="muted">v{d.latestVersion}</div>
+                <div className="muted">v{d.latestVersion}{d.partCount != null ? ` · ${d.partCount} parts` : ''}</div>
               </Link>
             ))}
             {!items.length && <p className="muted">No designs yet — upload a DXF to begin.</p>}

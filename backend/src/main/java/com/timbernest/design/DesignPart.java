@@ -1,34 +1,32 @@
-package com.timbernest.job;
+package com.timbernest.design;
 
 import jakarta.persistence.*;
 
 @Entity
-public class JobPart {
+public class DesignPart {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
-    private Long jobId;
     private Long designVersionId;
-    private Long designPartId;
+    private int partIndex;
     private String label;
-    private int quantity = 1;
-    private boolean grainSensitive;
+    private String contourId;
+    @Column(columnDefinition = "TEXT")
+    private String geometryJson;
     private double widthMm;
     private double heightMm;
 
     public Long getId() { return id; }
-    public Long getJobId() { return jobId; }
-    public void setJobId(Long jobId) { this.jobId = jobId; }
     public Long getDesignVersionId() { return designVersionId; }
     public void setDesignVersionId(Long designVersionId) { this.designVersionId = designVersionId; }
-    public Long getDesignPartId() { return designPartId; }
-    public void setDesignPartId(Long designPartId) { this.designPartId = designPartId; }
+    public int getPartIndex() { return partIndex; }
+    public void setPartIndex(int partIndex) { this.partIndex = partIndex; }
     public String getLabel() { return label; }
     public void setLabel(String label) { this.label = label; }
-    public int getQuantity() { return quantity; }
-    public void setQuantity(int quantity) { this.quantity = quantity; }
-    public boolean isGrainSensitive() { return grainSensitive; }
-    public void setGrainSensitive(boolean grainSensitive) { this.grainSensitive = grainSensitive; }
+    public String getContourId() { return contourId; }
+    public void setContourId(String contourId) { this.contourId = contourId; }
+    public String getGeometryJson() { return geometryJson; }
+    public void setGeometryJson(String geometryJson) { this.geometryJson = geometryJson; }
     public double getWidthMm() { return widthMm; }
     public void setWidthMm(double widthMm) { this.widthMm = widthMm; }
     public double getHeightMm() { return heightMm; }

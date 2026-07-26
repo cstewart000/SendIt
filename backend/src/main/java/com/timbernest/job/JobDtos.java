@@ -12,8 +12,8 @@ public final class JobDtos {
     public record CreateJobRequest(Long machineId, Long materialId, Long toolId,
                                    Double marginMm, Double partGapMm) {}
 
-    public record AddPartRequest(Long designVersionId, String label, Integer quantity,
-                                 Boolean grainSensitive) {}
+    public record AddPartRequest(Long designVersionId, List<Long> partIds, String label,
+                                 Integer quantity, Boolean grainSensitive) {}
 
     public record AdjustNestRequest(List<NestPlacement> placements) {}
 
