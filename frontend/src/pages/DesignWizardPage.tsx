@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api/client'
 import { Shell } from '../components/Shell'
-import { PartPicker, type DesignPart } from '../components/PartPicker'
+import { PartPicker, type DesignPart, type PartSelection } from '../components/PartPicker'
 import { Viewer2D } from '../components/viewer2d/Viewer2D'
 import { Viewer3D } from '../components/viewer3d/Viewer3D'
 
@@ -30,8 +30,7 @@ export function DesignWizardPage() {
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [machIssues, setMachIssues] = useState<Version['issues']>([])
   const [parts, setParts] = useState<DesignPart[]>([])
-  const [selected, setSelected] = useState<number[]>([])
-  const [qty, setQty] = useState(1)
+  const [selection, setSelection] = useState<PartSelection>({})
   const [error, setError] = useState('')
   const version = detail?.versions[0]
 
@@ -72,7 +71,10 @@ export function DesignWizardPage() {
   }
 
   async function continueToJob() {
-    if (!version || !catalog || !selected.length) return
+    const quantities = Object.entries(selection).map(([partId, quantity]) => ({
+      partId: Number(partId), quantity,
+    }))
+    if (!version || !catalog || !quantities.length) return
     await api(`/designs/${id}/versions/${version.id}/acknowledge-warnings`, {
       method: 'POST', body: JSON.stringify({ acknowledge: true }),
     })
@@ -86,14 +88,16 @@ export function DesignWizardPage() {
     })
     await api(`/jobs/${job.id}/parts`, {
       method: 'POST',
-      body: JSON.stringify({ designVersionId: version.id, partIds: selected, quantity: qty }),
+      body: JSON.stringify({ designVersionId: version.id, quantities }),
     })
     nav(`/jobs/${job.id}`)
   }
 
+  const selectedIds = Object.keys(selection).map(Number)
+  const totalPieces = Object.values(selection).reduce((a, b) => a + b, 0)
   const highlight = useMemo(
-    () => parts.filter(p => selected.includes(p.id)).flatMap(p => p.geometry?.contours || []),
-    [parts, selected],
+    () => parts.filter(p => selectedIds.includes(p.id)).flatMap(p => p.geometry?.contours || []),
+    [parts, selection],
   )
   const contours = version?.geometry?.contours || []
   const issues = step >= 2 ? machIssues : version?.issues || []
@@ -129,15 +133,12 @@ export function DesignWizardPage() {
           )}
           {step === 2 && version && (
             <>
-              <h3>Select parts for job</h3>
-              <p className="muted">{version.partCount ?? parts.length} nestable part(s). Pick one, many, or all.</p>
-              <PartPicker designId={id!} versionId={version.id} selected={selected}
-                onChange={setSelected} onPartsLoaded={setParts} />
-              <label>Quantity per part
-                <input type="number" min={1} value={qty} onChange={e => setQty(Number(e.target.value) || 1)} />
-              </label>
-              <button onClick={continueToJob} disabled={!selected.length}>
-                Create job with {selected.length} part(s) × {qty}
+              <h3>Select parts & quantities</h3>
+              <p className="muted">Set qty per part, or use “Set all” for multiples of every part.</p>
+              <PartPicker designId={id!} versionId={version.id} selection={selection}
+                onChange={setSelection} onPartsLoaded={setParts} />
+              <button onClick={continueToJob} disabled={!selectedIds.length}>
+                Create job ({selectedIds.length} types, {totalPieces} pieces)
               </button>
             </>
           )}

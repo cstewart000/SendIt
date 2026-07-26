@@ -42,6 +42,12 @@ public class JobController {
         return jobs.addPart(user, id, req);
     }
 
+    @PatchMapping("/{id}/parts")
+    public JobDtos.JobView updateQuantities(@AuthenticationPrincipal AppUser user, @PathVariable Long id,
+                                            @RequestBody JobDtos.UpdateQuantitiesRequest req) {
+        return jobs.updateQuantities(user, id, req);
+    }
+
     @PostMapping("/{id}/nest")
     public JobDtos.JobView nest(@AuthenticationPrincipal AppUser user, @PathVariable Long id) {
         return workflow.nest(user, id);

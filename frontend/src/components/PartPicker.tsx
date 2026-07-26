@@ -11,16 +11,19 @@ export type DesignPart = {
   geometry?: { contours: { id?: string; closed?: boolean; points: { x: number; y: number }[] }[] }
 }
 
+export type PartSelection = Record<number, number> // partId -> qty (>0 selected)
+
 type Props = {
   designId: number | string
   versionId: number
-  selected: number[]
-  onChange: (ids: number[]) => void
+  selection: PartSelection
+  onChange: (sel: PartSelection) => void
   onPartsLoaded?: (parts: DesignPart[]) => void
 }
 
-export function PartPicker({ designId, versionId, selected, onChange, onPartsLoaded }: Props) {
+export function PartPicker({ designId, versionId, selection, onChange, onPartsLoaded }: Props) {
   const [parts, setParts] = useState<DesignPart[]>([])
+  const [bulkQty, setBulkQty] = useState(1)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -29,29 +32,70 @@ export function PartPicker({ designId, versionId, selected, onChange, onPartsLoa
       .then(list => {
         setParts(list)
         onPartsLoaded?.(list)
-        if (!selected.length && list.length) onChange(list.map(p => p.id))
+        if (!Object.keys(selection).length && list.length) {
+          const next: PartSelection = {}
+          list.forEach(p => { next[p.id] = 1 })
+          onChange(next)
+        }
         console.log('[parts] loaded', list.length)
       })
       .catch(e => setError(e.message))
   }, [designId, versionId])
 
-  function toggle(id: number) {
-    onChange(selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id])
+  function setQty(id: number, qty: number) {
+    const q = Math.max(0, Math.floor(qty))
+    const next = { ...selection }
+    if (q <= 0) delete next[id]
+    else next[id] = q
+    onChange(next)
   }
+
+  function selectAll(qty = 1) {
+    const next: PartSelection = {}
+    parts.forEach(p => { next[p.id] = Math.max(1, qty) })
+    onChange(next)
+  }
+
+  function applyBulk() {
+    const q = Math.max(1, bulkQty)
+    const next: PartSelection = {}
+    const ids = Object.keys(selection).length ? Object.keys(selection).map(Number) : parts.map(p => p.id)
+    ids.forEach(id => { next[id] = q })
+    onChange(next)
+    console.log('[parts] bulk qty', q, 'on', ids.length)
+  }
+
+  const selectedCount = Object.keys(selection).length
+  const totalQty = Object.values(selection).reduce((a, b) => a + b, 0)
 
   return (
     <div className="grid">
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button type="button" className="ghost" onClick={() => onChange(parts.map(p => p.id))}>Select all</button>
-        <button type="button" className="ghost" onClick={() => onChange([])}>Clear</button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button type="button" className="ghost" onClick={() => selectAll(1)}>Select all ×1</button>
+        <button type="button" className="ghost" onClick={() => onChange({})}>Clear</button>
+        <input type="number" min={1} value={bulkQty} style={{ width: 72 }}
+          onChange={e => setBulkQty(Number(e.target.value) || 1)} title="Bulk quantity" />
+        <button type="button" className="ghost" onClick={applyBulk}>
+          Set all{selectedCount ? ' selected' : ''} to ×{bulkQty}
+        </button>
       </div>
+      <p className="muted">{selectedCount} part type(s), {totalQty} total pieces</p>
       {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
       {!parts.length && <p className="muted">No nestable parts yet — analyse the design first.</p>}
       {parts.map(p => (
-        <label key={p.id} className="issue" style={{ display: 'flex', gap: 8, alignItems: 'center', cursor: 'pointer' }}>
-          <input type="checkbox" checked={selected.includes(p.id)} onChange={() => toggle(p.id)} />
-          <span><strong>{p.label}</strong> — {p.widthMm.toFixed(0)}×{p.heightMm.toFixed(0)} mm</span>
-        </label>
+        <div key={p.id} className="issue" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <input type="checkbox" checked={selection[p.id] != null}
+            onChange={() => setQty(p.id, selection[p.id] != null ? 0 : 1)} />
+          <span style={{ flex: 1 }}>
+            <strong>{p.label}</strong> — {p.widthMm.toFixed(0)}×{p.heightMm.toFixed(0)} mm
+          </span>
+          <label style={{ display: 'flex', gap: 4, alignItems: 'center', margin: 0 }}>
+            Qty
+            <input type="number" min={0} style={{ width: 64 }}
+              value={selection[p.id] ?? 0}
+              onChange={e => setQty(p.id, Number(e.target.value) || 0)} />
+          </label>
+        </div>
       ))}
     </div>
   )

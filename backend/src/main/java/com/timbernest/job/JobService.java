@@ -60,13 +60,15 @@ public class JobService {
         DesignVersion v = versions.findById(req.designVersionId())
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Version not found"));
         designAccess.ownedVersion(user, v.getDesignId(), v.getId());
-        List<DesignPart> selected = resolveParts(v.getId(), req.partIds());
+        Map<Long, Integer> qtyByPart = qtyMap(req);
+        List<DesignPart> selected = resolveParts(v.getId(), req.partIds(), qtyByPart);
         if (selected.isEmpty()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "No nestable parts on this design version");
         }
-        int qty = req.quantity() == null ? 1 : Math.max(1, req.quantity());
+        int defaultQty = req.quantity() == null ? 1 : Math.max(1, req.quantity());
         boolean grain = Boolean.TRUE.equals(req.grainSensitive());
         for (DesignPart dp : selected) {
+            int qty = Math.max(1, qtyByPart.getOrDefault(dp.getId(), defaultQty));
             JobPart part = new JobPart();
             part.setJobId(jobId);
             part.setDesignVersionId(v.getId());
@@ -80,18 +82,65 @@ public class JobService {
         }
         job.touch();
         jobs.save(job);
-        log.info("Added {} design parts x{} to job {}", selected.size(), qty, jobId);
+        log.info("Added {} design parts to job {}", selected.size(), jobId);
         return view(job);
     }
 
-    private List<DesignPart> resolveParts(Long versionId, List<Long> partIds) {
-        List<DesignPart> all = designParts.findByDesignVersionIdOrderByPartIndexAsc(versionId);
-        if (partIds == null || partIds.isEmpty()) return all;
-        List<DesignPart> out = new ArrayList<>();
-        for (DesignPart p : all) {
-            if (partIds.contains(p.getId())) out.add(p);
+    public JobDtos.JobView updateQuantities(AppUser user, Long jobId, JobDtos.UpdateQuantitiesRequest req) {
+        Job job = owned(user, jobId);
+        if (job.isNestingLocked()) throw new ApiException(HttpStatus.CONFLICT, "Nesting locked");
+        List<JobPart> jobParts = parts.findByJobId(jobId);
+        if (req.allQuantity() != null) {
+            int q = Math.max(1, req.allQuantity());
+            for (JobPart p : jobParts) {
+                p.setQuantity(q);
+                parts.save(p);
+            }
+            log.info("Set all job {} parts to qty {}", jobId, q);
+        } else if (req.updates() != null) {
+            for (JobDtos.QtyUpdate u : req.updates()) {
+                for (JobPart p : jobParts) {
+                    if (p.getId().equals(u.jobPartId())) {
+                        p.setQuantity(Math.max(1, u.quantity() == null ? 1 : u.quantity()));
+                        parts.save(p);
+                    }
+                }
+            }
         }
-        return out;
+        job.touch();
+        jobs.save(job);
+        return view(job);
+    }
+
+    private Map<Long, Integer> qtyMap(JobDtos.AddPartRequest req) {
+        Map<Long, Integer> map = new java.util.HashMap<>();
+        if (req.quantities() != null) {
+            for (JobDtos.PartQty q : req.quantities()) {
+                if (q.partId() != null) {
+                    map.put(q.partId(), Math.max(1, q.quantity() == null ? 1 : q.quantity()));
+                }
+            }
+        }
+        return map;
+    }
+
+    private List<DesignPart> resolveParts(Long versionId, List<Long> partIds, Map<Long, Integer> qtyByPart) {
+        List<DesignPart> all = designParts.findByDesignVersionIdOrderByPartIndexAsc(versionId);
+        if (partIds != null && !partIds.isEmpty()) {
+            List<DesignPart> out = new ArrayList<>();
+            for (DesignPart p : all) {
+                if (partIds.contains(p.getId())) out.add(p);
+            }
+            return out;
+        }
+        if (!qtyByPart.isEmpty()) {
+            List<DesignPart> out = new ArrayList<>();
+            for (DesignPart p : all) {
+                if (qtyByPart.containsKey(p.getId())) out.add(p);
+            }
+            return out;
+        }
+        return all;
     }
 
     public Job owned(AppUser user, Long id) {
