@@ -78,11 +78,15 @@ public class JobWorkflowService {
     public JobDtos.JobView adjust(AppUser user, Long jobId, List<NestPlacement> placements) {
         Job job = jobs.owned(user, jobId);
         if (job.isNestingLocked()) throw new ApiException(HttpStatus.CONFLICT, "Nesting locked");
+        Map<Long, JobPart> byId = new HashMap<>();
+        for (JobPart p : parts.findByJobId(jobId)) byId.put(p.getId(), p);
+        nesting.syncSharedOrientations(placements, byId);
         NestResult nest = readNest(job);
         nest.setPlacements(placements);
         job.setNestingJson(jobs.writeJson(nest));
         job.touch();
         jobRepo.save(job);
+        log.info("Adjusted nesting for job {} ({} placements)", jobId, placements.size());
         return jobs.view(job);
     }
 

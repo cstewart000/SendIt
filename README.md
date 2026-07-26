@@ -31,6 +31,10 @@ Open http://localhost:5173
 ### Demo DXFs (`samples/`)
 | File | Purpose |
 |------|---------|
+| `star-5.dxf` | Five-pointed star |
+| `l-shape.dxf` | Simple L profile |
+| `t-shape.dxf` | Simple T profile |
+| `rect-with-hole.dxf` | Rectangle with internal rectangular cutout |
 | `l-bracket.dxf` | L-shape with sharp internal corner (dog-bone) |
 | `u-channel.dxf` | U-channel, two internal corners |
 | `t-slot-plate.dxf` | T-slot notch, multiple sharp insides |

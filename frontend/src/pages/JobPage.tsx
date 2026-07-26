@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { api, apiBlob } from '../api/client'
 import { Shell } from '../components/Shell'
 import { PartPicker, type PartSelection } from '../components/PartPicker'
-import { Viewer2D } from '../components/viewer2d/Viewer2D'
+import { NestEditor } from '../components/viewer2d/NestEditor'
+import type { NestPlacement } from '../components/viewer2d/nestMath'
 
 type JobPart = {
   id: number; label: string; quantity: number; widthMm: number; heightMm: number
@@ -13,7 +14,7 @@ type Job = {
   id: number; status: string; nestingLocked: boolean; hasGcode: boolean; parts?: JobPart[]
   nesting?: {
     sheetWidth: number; sheetHeight: number; sheetCount: number
-    placements: { x: number; y: number; width: number; height: number; label?: string; sheetIndex?: number }[]
+    placements: NestPlacement[]
   }
   quote?: { total: number; currency: string; cycleMinutes: number; lines: { label: string; amount: number }[] }
 }
@@ -29,10 +30,9 @@ export function JobPage() {
   const [selection, setSelection] = useState<PartSelection>({})
   const [allQty, setAllQty] = useState(1)
   const [error, setError] = useState('')
+  const nestSave = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  async function reload() {
-    setJob(await api<Job>(`/jobs/${id}`))
-  }
+  async function reload() { setJob(await api<Job>(`/jobs/${id}`)) }
 
   useEffect(() => {
     reload().catch(e => setError(e.message))
@@ -52,10 +52,8 @@ export function JobPage() {
     }))
     if (!versionId || !quantities.length) return
     setJob(await api<Job>(`/jobs/${id}/parts`, {
-      method: 'POST',
-      body: JSON.stringify({ designVersionId: versionId, quantities }),
+      method: 'POST', body: JSON.stringify({ designVersionId: versionId, quantities }),
     }))
-    console.log('[job] added', quantities)
   }
 
   async function setJobPartQty(jobPartId: number, quantity: number) {
@@ -67,8 +65,7 @@ export function JobPage() {
 
   async function setAllJobQty() {
     setJob(await api<Job>(`/jobs/${id}/parts`, {
-      method: 'PATCH',
-      body: JSON.stringify({ allQuantity: Math.max(1, allQty) }),
+      method: 'PATCH', body: JSON.stringify({ allQuantity: Math.max(1, allQty) }),
     }))
   }
 
@@ -76,6 +73,21 @@ export function JobPage() {
   async function lock() { setJob(await api<Job>(`/jobs/${id}/lock-nesting`, { method: 'POST' })) }
   async function quote() { setJob(await api<Job>(`/jobs/${id}/quote`, { method: 'POST' })) }
   async function approve() { setJob(await api<Job>(`/jobs/${id}/approve`, { method: 'POST' })) }
+
+  function onNestChange(placements: NestPlacement[]) {
+    setJob(j => (j?.nesting ? { ...j, nesting: { ...j.nesting, placements } } : j))
+    if (nestSave.current) clearTimeout(nestSave.current)
+    nestSave.current = setTimeout(async () => {
+      try {
+        setJob(await api<Job>(`/jobs/${id}/nesting`, {
+          method: 'PATCH', body: JSON.stringify({ placements }),
+        }))
+        console.log('[job] nest adjusted', placements.length)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Nest adjust failed')
+      }
+    }, 350)
+  }
 
   async function download(kind: 'gcode' | 'setup-sheet') {
     const blob = await apiBlob(`/jobs/${id}/${kind}`)
@@ -94,29 +106,29 @@ export function JobPage() {
       <div className="grid two">
         <div className="panel">
           <h2>Job #{job?.id} — {job?.status}</h2>
-          <Viewer2D
-            nests={job?.nesting?.placements}
-            sheet={job?.nesting ? { width: job.nesting.sheetWidth, height: job.nesting.sheetHeight } : undefined}
-          />
+          {job?.nesting ? (
+            <NestEditor
+              sheet={{ width: job.nesting.sheetWidth, height: job.nesting.sheetHeight }}
+              placements={job.nesting.placements || []}
+              locked={job.nestingLocked}
+              onChange={onNestChange}
+            />
+          ) : (
+            <p className="muted">Run auto-nest to place parts on the sheet.</p>
+          )}
           <p className="muted">Sheets: {job?.nesting?.sheetCount ?? 0}</p>
           <h3>Parts on job</h3>
           {!job?.nestingLocked && (job?.parts?.length ?? 0) > 0 && (
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
               <input type="number" min={1} value={allQty} style={{ width: 72 }}
                 onChange={e => setAllQty(Number(e.target.value) || 1)} />
-              <button type="button" className="ghost" onClick={setAllJobQty}>
-                Set all parts to ×{allQty}
-              </button>
+              <button type="button" className="ghost" onClick={setAllJobQty}>Set all parts to ×{allQty}</button>
             </div>
           )}
           {(job?.parts || []).map(p => (
             <div key={p.id} className="issue" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-              <span style={{ flex: 1 }}>
-                {p.label} — {p.widthMm.toFixed(0)}×{p.heightMm.toFixed(0)} mm
-              </span>
-              {job?.nestingLocked ? (
-                <span>×{p.quantity}</span>
-              ) : (
+              <span style={{ flex: 1 }}>{p.label} — {p.widthMm.toFixed(0)}×{p.heightMm.toFixed(0)} mm</span>
+              {job?.nestingLocked ? <span>×{p.quantity}</span> : (
                 <input type="number" min={1} style={{ width: 64 }} defaultValue={p.quantity}
                   key={`${p.id}-${p.quantity}`}
                   onBlur={e => setJobPartQty(p.id, Number(e.target.value) || 1)} />
