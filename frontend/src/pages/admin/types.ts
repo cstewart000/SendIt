@@ -8,6 +8,16 @@ export type Machine = {
   defaultFeedMmMin: number
   defaultSpeedRpm: number
   hourlyRate: number
+  /** Min part-to-part gap and sheet edge clearance (mm) for nesting */
+  kerfMm: number
+  /** Min distance from screw-hole centre to toolpath edge (mm) */
+  fixingMinToolDistanceMm: number
+  fixingHoleDiameterMm: number
+  fixingsEnabled: boolean
+  tabsEnabled: boolean
+  tabWidthMm: number
+  tabHeightMm: number
+  tabCount: number
 }
 
 export type Tool = {
@@ -51,6 +61,14 @@ export type PricingRule = {
 export const emptyMachine = (): Machine => ({
   name: '', workXmm: 2440, workYmm: 1220, workZmm: 100,
   postProcessor: 'LinuxCNC', defaultFeedMmMin: 3000, defaultSpeedRpm: 18000, hourlyRate: 60,
+  kerfMm: 8,
+  fixingMinToolDistanceMm: 10,
+  fixingHoleDiameterMm: 4,
+  fixingsEnabled: true,
+  tabsEnabled: true,
+  tabWidthMm: 5,
+  tabHeightMm: 1.5,
+  tabCount: 4,
 })
 
 export const emptyTool = (machineId: number): Tool => ({

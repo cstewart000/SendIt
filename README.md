@@ -72,7 +72,11 @@ DWG upload is supported (R2000–R2018 best-effort via native parse); complex en
 
 ## Manufacturing notes (current)
 - Nesting **fails closed**: if any piece cannot fit the sheet, nest returns `422` (no partial nest).
+- Machine **kerf** (admin) sets minimum part-to-part gap and sheet edge margin (also at least tool Ø).
 - G-code is **offline tool-radius offset** (G40), holes before outer profile, multi-pass depth, machine safe-Z.
+- Job page: **toolpath preview** after nest (screws, tabs, cuts); toggle screws via checklist / click; download `.ngc` after approve.
+- Machine admin: **kerf**, **fixing min distance** (default 10 mm), **tab width/height/count**.
+- Hobby CNC tool kit is seeded (endmills, compression, ballnose, V-bits, surfacing, drills).
 - Quotes use the same multi-pass path metrics as CAM (not single-pass contour length).
 - Set `JWT_SECRET` in production/Railway — startup refuses the dev default when Railway env is detected.
 

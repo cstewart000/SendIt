@@ -52,9 +52,10 @@ class GCodeGeneratorTest {
         assertTrue(nc.contains("G40")); // offline offset, not live comp
         assertTrue(nc.contains("Z15.000") || nc.contains("Z15"));
         assertTrue(nc.contains("(hole)"));
-        assertTrue(nc.contains("(outer)"));
+        assertTrue(nc.contains("(outer") || nc.contains("outer with tabs"),
+                "expected outer profile cut");
         int holeAt = nc.indexOf("(hole)");
-        int outerAt = nc.indexOf("(outer)");
+        int outerAt = Math.max(nc.indexOf("(outer"), nc.indexOf("outer with tabs"));
         assertTrue(holeAt >= 0 && outerAt > holeAt, "holes must be cut before outer profile");
         // multi-pass for 18mm / 6mm step → 3 passes
         long zCuts = nc.lines().filter(l -> l.startsWith("G1 Z-")).count();

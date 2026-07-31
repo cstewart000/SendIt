@@ -40,6 +40,20 @@ export function DesignWizardPage() {
     return d
   }
 
+  async function loadParts(versionId: number) {
+    try {
+      const list = await api<DesignPart[]>(`/designs/${id}/versions/${versionId}/parts`)
+      setParts(list)
+      if (!Object.keys(selection).length && list.length) {
+        const next: PartSelection = {}
+        list.forEach(p => { next[p.id] = 1 })
+        setSelection(next)
+      }
+    } catch {
+      /* parts may not exist until analyse */
+    }
+  }
+
   useEffect(() => {
     Promise.all([reload(), api<Catalog>('/catalog')])
       .then(async ([d, c]) => {
@@ -48,14 +62,19 @@ export function DesignWizardPage() {
           const v = d.versions[0]
           const fn = (v.originalFilename || '').toLowerCase()
           const reparseKey = `dwg-linefix-v1-${v.id}`
+          // Force re-analyse once after contour-join fix so multi-part kits re-extract all outers
+          const joinFixKey = `contour-join-v2-${v.id}`
           const needsAnalyse = !v.analysed
             || (fn.endsWith('.dwg') && !localStorage.getItem(reparseKey))
+            || !localStorage.getItem(joinFixKey)
           if (needsAnalyse) {
             console.log('[wizard] analyse', v.id, fn)
             await api(`/designs/${id}/versions/${v.id}/analyse`, { method: 'POST' })
             if (fn.endsWith('.dwg')) localStorage.setItem(reparseKey, '1')
+            localStorage.setItem(joinFixKey, '1')
             await reload()
           }
+          await loadParts(v.id)
         }
       })
       .catch(e => setError(e.message))
@@ -66,7 +85,8 @@ export function DesignWizardPage() {
     await api(`/designs/${id}/versions/${version.id}/repairs/${action}`, {
       method: 'POST', body: JSON.stringify({ confirm: true }),
     })
-    await reload()
+    const d = await reload()
+    if (d.versions[0]) await loadParts(d.versions[0].id)
   }
 
   async function runMachinability() {
@@ -105,11 +125,17 @@ export function DesignWizardPage() {
 
   const selectedIds = Object.keys(selection).map(Number)
   const totalPieces = Object.values(selection).reduce((a, b) => a + b, 0)
+  // 2D: dim to selected when user has a selection; else full file
   const highlight = useMemo(
     () => parts.filter(p => selectedIds.includes(p.id)).flatMap(p => p.geometry?.contours || []),
     [parts, selection],
   )
   const contours = version?.geometry?.contours || []
+  // 3D: always show every design part (not a single outer)
+  const partsFor3d = useMemo(() => {
+    if (parts.length) return parts
+    return []
+  }, [parts])
   const issues = step >= 2 ? machIssues : version?.issues || []
 
   return (
@@ -125,7 +151,14 @@ export function DesignWizardPage() {
           <h2>{detail?.name || 'Design'}</h2>
           <Viewer2D contours={highlight.length ? highlight : contours} issues={issues} />
           <div style={{ marginTop: '1rem' }}>
-            <Viewer3D contours={highlight.length ? highlight : contours} />
+            <p className="muted" style={{ margin: '0 0 0.4rem', fontSize: '0.85rem' }}>
+              3D: drag rotate · right-drag pan · scroll zoom
+              {partsFor3d.length > 0 ? ` · ${partsFor3d.length} part(s)` : ''}
+            </p>
+            <Viewer3D
+              parts={partsFor3d.length ? partsFor3d : undefined}
+              contours={partsFor3d.length ? undefined : contours}
+            />
           </div>
         </div>
         <div className="panel grid">

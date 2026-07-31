@@ -1,6 +1,7 @@
 package com.timbernest.design;
 
 import com.timbernest.common.ApiException;
+import com.timbernest.geometry.ContourJoiner;
 import com.timbernest.geometry.GeometryAnalyser;
 import com.timbernest.geometry.GeometryRepairer;
 import com.timbernest.geometry.JsonUtil;
@@ -81,6 +82,8 @@ public class DesignService {
     public DesignDtos.VersionDto analyse(AppUser user, Long designId, Long versionId) {
         DesignVersion v = access.ownedVersion(user, designId, versionId);
         GeometryModel model = access.loadOrParse(v);
+        // Re-join on analyse so cached LINE/ARC chains (pre-fix uploads) seal into profiles
+        ContourJoiner.joinAdaptive(model);
         v.setGeometryJson(json.toJson(model));
         v.setIssuesJson(json.toJson(analyser.analyse(model)));
         v.setAnalysed(true);
@@ -95,7 +98,9 @@ public class DesignService {
         if (!confirm) throw new ApiException(HttpStatus.BAD_REQUEST, "Repair must be confirmed");
         DesignVersion v = access.ownedVersion(user, designId, versionId);
         GeometryModel model = access.loadOrParse(v);
+        ContourJoiner.joinAdaptive(model);
         String reason = repairer.apply(model, action);
+        ContourJoiner.joinAdaptive(model);
         v.setGeometryJson(json.toJson(model));
         v.setIssuesJson(json.toJson(analyser.analyse(model)));
         v.setRepaired(true);

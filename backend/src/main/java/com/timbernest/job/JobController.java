@@ -1,5 +1,7 @@
 package com.timbernest.job;
 
+import com.timbernest.cam.CamOptions;
+import com.timbernest.cam.ToolpathResult;
 import com.timbernest.user.AppUser;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -83,6 +85,19 @@ public class JobController {
     @PostMapping("/{id}/approve")
     public JobDtos.JobView approve(@AuthenticationPrincipal AppUser user, @PathVariable Long id) {
         return workflow.approve(user, id);
+    }
+
+    /** Structured toolpaths for canvas visualisation (available after nest). */
+    @GetMapping("/{id}/toolpath")
+    public ToolpathResult toolpath(@AuthenticationPrincipal AppUser user, @PathVariable Long id) {
+        return workflow.toolpath(user, id);
+    }
+
+    /** Toggle screw fixings / tabs; body: { disabledFixingIds, tabsEnabled, fixingsEnabled }. */
+    @PatchMapping("/{id}/cam-options")
+    public ToolpathResult camOptions(@AuthenticationPrincipal AppUser user, @PathVariable Long id,
+                                     @RequestBody CamOptions options) {
+        return workflow.updateCamOptions(user, id, options);
     }
 
     @GetMapping("/{id}/gcode")

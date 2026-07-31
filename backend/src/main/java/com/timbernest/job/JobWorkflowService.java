@@ -1,8 +1,10 @@
 package com.timbernest.job;
 
 import com.timbernest.admin.*;
+import com.timbernest.cam.CamOptions;
 import com.timbernest.cam.GCodeGenerator;
 import com.timbernest.cam.SetupSheetWriter;
+import com.timbernest.cam.ToolpathResult;
 import com.timbernest.common.ApiException;
 import com.timbernest.common.JobStatus;
 import com.timbernest.design.DesignAccess;
@@ -67,17 +69,28 @@ public class JobWorkflowService {
         Job job = jobs.owned(user, jobId);
         Material mat = materials.findById(job.getMaterialId())
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Material missing"));
+        Machine machine = machines.findById(job.getMachineId())
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "Machine missing"));
+        Tool tool = tools.findById(job.getToolId()).orElse(null);
+        // Kerf = min edge margin and min part-to-part gap (at least tool diameter if larger)
+        double kerf = machine.getKerfMm() > 0 ? machine.getKerfMm() : 8;
+        if (tool != null && tool.getDiameterMm() > kerf) kerf = tool.getDiameterMm();
+        double margin = Math.max(job.getMarginMm(), kerf);
+        double gap = Math.max(job.getPartGapMm(), kerf);
+        job.setMarginMm(margin);
+        job.setPartGapMm(gap);
+
         List<JobPart> jobParts = parts.findByJobId(jobId);
         Map<Long, GeometryModel> geos = new HashMap<>();
         for (JobPart p : jobParts) geos.put(p.getId(), loadModel(user, p));
         NestResult result = nesting.nest(jobParts, geos, mat.getSheetWidthMm(),
-                mat.getSheetHeightMm(), job.getMarginMm(), job.getPartGapMm());
+                mat.getSheetHeightMm(), margin, gap);
         job.setNestingJson(jobs.writeJson(result));
         job.setStatus(JobStatus.NESTED);
         job.setNestingLocked(false);
         job.touch();
         jobRepo.save(job);
-        log.info("Nested job {}", jobId);
+        log.info("Nested job {} kerf/margin={} gap={}", jobId, margin, gap);
         return jobs.view(job);
     }
 
@@ -129,15 +142,65 @@ public class JobWorkflowService {
         Material mat = materials.findById(job.getMaterialId()).orElseThrow();
         Tool tool = tools.findById(job.getToolId()).orElseThrow();
         List<GeometryModel> geos = geometries(user, jobId);
-        String nc = gcode.generate(nest, geos, nest.getPlacements(), machine, tool, mat);
+        ToolpathResult tp = gcode.build(nest, geos, machine, tool, mat, readCam(job));
         String setup = setupSheets.write(jobId, machine, tool, mat, nest, jobs.readMap(job.getQuoteJson()));
-        job.setGcodePath(storage.writeText("gcode", "job-" + jobId + ".ngc", nc));
+        job.setGcodePath(storage.writeText("gcode", "job-" + jobId + ".ngc", tp.getGcode()));
         job.setSetupSheetPath(storage.writeText("gcode", "job-" + jobId + "-setup.txt", setup));
         job.setStatus(JobStatus.READY_FOR_PRODUCTION);
         job.touch();
         jobRepo.save(job);
-        log.info("Approved job {} -> READY_FOR_PRODUCTION", jobId);
+        log.info("Approved job {} -> READY_FOR_PRODUCTION paths={} fixings={}",
+                jobId, tp.getPaths().size(), tp.getFixings().size());
         return jobs.view(job);
+    }
+
+    /** Toolpath preview (after nest) or regenerated from saved nest + tool. */
+    public ToolpathResult toolpath(AppUser user, Long jobId) {
+        Job job = jobs.owned(user, jobId);
+        if (job.getNestingJson() == null || job.getNestingJson().isBlank()
+                || "{}".equals(job.getNestingJson().trim())) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Nest the job before previewing toolpaths");
+        }
+        NestResult nest = readNest(job);
+        if (nest.getPlacements() == null || nest.getPlacements().isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "No nest placements");
+        }
+        Machine machine = machines.findById(job.getMachineId()).orElseThrow();
+        Material mat = materials.findById(job.getMaterialId()).orElseThrow();
+        Tool tool = tools.findById(job.getToolId()).orElseThrow();
+        List<GeometryModel> geos = geometries(user, jobId);
+        return gcode.build(nest, geos, machine, tool, mat, readCam(job));
+    }
+
+    /** Update disabled screw ids / tab toggles; returns refreshed toolpath. */
+    public ToolpathResult updateCamOptions(AppUser user, Long jobId, CamOptions options) {
+        Job job = jobs.owned(user, jobId);
+        if (options == null) options = new CamOptions();
+        CamOptions cur = readCam(job);
+        if (options.getDisabledFixingIds() != null) {
+            cur.setDisabledFixingIds(options.getDisabledFixingIds());
+        }
+        if (options.getTabsEnabled() != null) cur.setTabsEnabled(options.getTabsEnabled());
+        if (options.getFixingsEnabled() != null) cur.setFixingsEnabled(options.getFixingsEnabled());
+        try {
+            job.setCamJson(mapper.writeValueAsString(cur));
+        } catch (Exception e) {
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Could not save CAM options");
+        }
+        job.touch();
+        jobRepo.save(job);
+        log.info("CAM options job {} disabledFixings={}", jobId, cur.getDisabledFixingIds().size());
+        return toolpath(user, jobId);
+    }
+
+    private CamOptions readCam(Job job) {
+        try {
+            if (job.getCamJson() == null || job.getCamJson().isBlank()) return new CamOptions();
+            CamOptions o = mapper.readValue(job.getCamJson(), CamOptions.class);
+            return o != null ? o : new CamOptions();
+        } catch (Exception e) {
+            return new CamOptions();
+        }
     }
 
     public byte[] download(AppUser user, Long jobId, boolean setup) throws Exception {

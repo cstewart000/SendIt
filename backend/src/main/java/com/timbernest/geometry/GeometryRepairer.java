@@ -1,7 +1,9 @@
 package com.timbernest.geometry;
 
 import com.timbernest.common.ApiException;
-import com.timbernest.geometry.model.*;
+import com.timbernest.geometry.model.Contour;
+import com.timbernest.geometry.model.GeometryModel;
+import com.timbernest.geometry.model.Vec2;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -27,6 +29,8 @@ public class GeometryRepairer {
     }
 
     private String closeOpen(GeometryModel model) {
+        // First chain LINE/ARC segments, then seal near-closed loops
+        int joins = ContourJoiner.joinAdaptive(model);
         int n = 0;
         for (Contour c : model.getContours()) {
             if (!c.isClosed() && c.getPoints().size() >= 2) {
@@ -43,8 +47,8 @@ public class GeometryRepairer {
                 }
             }
         }
-        log.info("Closed {} contours", n);
-        return "Closed " + n + " near-open contours";
+        log.info("Closed {} contours ({} join merges)", n, joins);
+        return "Joined segments and closed " + n + " near-open contours";
     }
 
     private String removeZero(GeometryModel model) {

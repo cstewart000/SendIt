@@ -25,8 +25,9 @@ export function drawNestPart(
   c.save()
   c.translate(tx(cx), ty(cy))
   c.rotate(-rot)
-  c.fillStyle = selected ? 'rgba(125,211,252,0.28)' : 'rgba(59,130,196,0.18)'
-  c.strokeStyle = selected ? '#7dd3fc' : '#3b82c4'
+  // CAD-style sheet is white; keep parts readable in light plan view
+  c.fillStyle = selected ? 'rgba(37, 99, 168, 0.22)' : 'rgba(0, 0, 0, 0.06)'
+  c.strokeStyle = selected ? '#2563a8' : '#111111'
   c.lineWidth = selected ? 2 : 1.5
 
   if (shape?.contours?.length) {
@@ -47,7 +48,7 @@ export function drawNestPart(
     c.strokeRect((-nw / 2) * s, (-nh / 2) * s, nw * s, nh * s)
   }
 
-  c.fillStyle = '#e8eef5'
+  c.fillStyle = '#111111'
   c.font = '12px "IBM Plex Sans", Helvetica, Arial, sans-serif'
   c.fillText(n.label || 'Part', (-nw / 2) * s + 4, (-nh / 2) * s + 14)
   if (showHandle) {

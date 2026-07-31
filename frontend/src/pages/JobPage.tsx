@@ -4,6 +4,7 @@ import { api, apiBlob } from '../api/client'
 import { Shell } from '../components/Shell'
 import { PartPicker, type PartSelection } from '../components/PartPicker'
 import { NestEditor } from '../components/viewer2d/NestEditor'
+import { GCodeViewer, type ToolpathData } from '../components/viewer2d/GCodeViewer'
 import type { NestShape } from '../components/viewer2d/nestDraw'
 import type { NestPlacement } from '../components/viewer2d/nestMath'
 
@@ -13,6 +14,7 @@ type JobPart = {
 }
 type Job = {
   id: number; title?: string; status: string; nestingLocked: boolean; hasGcode: boolean
+  marginMm?: number; partGapMm?: number
   parts?: JobPart[]
   nesting?: {
     sheetWidth: number; sheetHeight: number; sheetCount: number
@@ -34,6 +36,9 @@ export function JobPage() {
   const [error, setError] = useState('')
   const [titleDraft, setTitleDraft] = useState('')
   const [shapes, setShapes] = useState<Record<number, NestShape>>({})
+  const [toolpath, setToolpath] = useState<ToolpathData | null>(null)
+  const [toolpathErr, setToolpathErr] = useState('')
+  const [camBusy, setCamBusy] = useState(false)
   const nestSave = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   async function loadShapes() {
@@ -61,7 +66,15 @@ export function JobPage() {
   }
 
   useEffect(() => {
-    reload().catch(e => setError(e.message))
+    reload()
+      .then(async () => {
+        // Load toolpath if already nested
+        try {
+          const j = await api<Job>(`/jobs/${id}`)
+          if (j.nesting?.placements?.length) await loadToolpath()
+        } catch { /* ignore */ }
+      })
+      .catch(e => setError(e.message))
     api<DesignSum[]>('/designs').then(setDesigns).catch(console.error)
   }, [id])
 
@@ -105,10 +118,57 @@ export function JobPage() {
     }))
   }
 
-  async function nest() { setJob(await api<Job>(`/jobs/${id}/nest`, { method: 'POST' })) }
+  async function loadToolpath() {
+    setToolpathErr('')
+    try {
+      const tp = await api<ToolpathData>(`/jobs/${id}/toolpath`)
+      setToolpath(tp)
+      console.log('[job] toolpath paths', tp.paths?.length, 'fixings', tp.fixings?.length)
+    } catch (e) {
+      setToolpath(null)
+      setToolpathErr(e instanceof Error ? e.message : 'Toolpath failed')
+    }
+  }
+
+  async function patchCamOptions(body: {
+    disabledFixingIds?: string[]
+    tabsEnabled?: boolean
+    fixingsEnabled?: boolean
+  }) {
+    setCamBusy(true)
+    setToolpathErr('')
+    try {
+      const tp = await api<ToolpathData>(`/jobs/${id}/cam-options`, {
+        method: 'PATCH', body: JSON.stringify(body),
+      })
+      setToolpath(tp)
+    } catch (e) {
+      setToolpathErr(e instanceof Error ? e.message : 'CAM options failed')
+    } finally {
+      setCamBusy(false)
+    }
+  }
+
+  function toggleFixing(fid: string, enabled: boolean) {
+    const all = toolpath?.fixings || []
+    const disabled = all
+      .filter(f => (f.id === fid ? !enabled : !f.enabled))
+      .map(f => f.id)
+    void patchCamOptions({ disabledFixingIds: disabled })
+  }
+
+  async function nest() {
+    const j = await api<Job>(`/jobs/${id}/nest`, { method: 'POST' })
+    setJob(j)
+    await loadToolpath().catch(console.error)
+  }
   async function lock() { setJob(await api<Job>(`/jobs/${id}/lock-nesting`, { method: 'POST' })) }
   async function quote() { setJob(await api<Job>(`/jobs/${id}/quote`, { method: 'POST' })) }
-  async function approve() { setJob(await api<Job>(`/jobs/${id}/approve`, { method: 'POST' })) }
+  async function approve() {
+    const j = await api<Job>(`/jobs/${id}/approve`, { method: 'POST' })
+    setJob(j)
+    await loadToolpath().catch(console.error)
+  }
 
   function onNestChange(placements: NestPlacement[]) {
     setJob(j => (j?.nesting ? { ...j, nesting: { ...j.nesting, placements } } : j))
@@ -161,7 +221,26 @@ export function JobPage() {
           ) : (
             <p className="muted">Run auto-nest to place parts on the sheet.</p>
           )}
-          <p className="muted">Sheets: {job?.nesting?.sheetCount ?? 0}</p>
+          <p className="muted">
+            Sheets: {job?.nesting?.sheetCount ?? 0}
+            {job?.marginMm != null && ` · edge margin ${job.marginMm} mm`}
+            {job?.partGapMm != null && ` · part gap ${job.partGapMm} mm`}
+          </p>
+          {job?.nesting?.placements?.length ? (
+            <div style={{ marginTop: '1rem' }}>
+              <div className="row" style={{ marginBottom: 8 }}>
+                <h3 style={{ margin: 0, flex: 1 }}>G-code / toolpath</h3>
+                <button type="button" className="ghost" onClick={loadToolpath}>Refresh preview</button>
+              </div>
+              {toolpathErr && <p style={{ color: 'var(--danger)' }}>{toolpathErr}</p>}
+              <GCodeViewer
+                data={toolpath}
+                busy={camBusy}
+                onToggleFixing={toggleFixing}
+                onCamOptions={opts => patchCamOptions(opts)}
+              />
+            </div>
+          ) : null}
           <h3>Parts on job</h3>
           {!job?.nestingLocked && (job?.parts?.length ?? 0) > 0 && (
             <div className="row" style={{ marginBottom: 8 }}>

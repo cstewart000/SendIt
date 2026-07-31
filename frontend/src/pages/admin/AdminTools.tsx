@@ -44,14 +44,17 @@ export function AdminTools({
   return (
     <div className="panel grid">
       <h2>Tools</h2>
+      <p className="muted" style={{ margin: 0 }}>
+        Hobby CNC kit (endmills, compression, ballnose, V-bits, surfacing, drills) is seeded on first boot.
+      </p>
       <CatalogImport mode="tools" machineId={machineId} onDone={async () => { await load(); await onSaved() }} />
       {items.map(t => (
         <button key={t.id} type="button" className="ghost issue" onClick={() => setDraft({ ...t })}
           style={{ textAlign: 'left', width: '100%' }}>
-          {t.name} — Ø{t.diameterMm}mm {t.type}
+          {t.name} — Ø{t.diameterMm}mm · {t.fluteCount}F · max {t.maxDepthMm}mm · {t.type}
         </button>
       ))}
-      {!items.length && <p className="muted">No tools on this machine yet.</p>}
+      {!items.length && <p className="muted">No tools on this machine yet — restart backend to seed hobby kit, or add below.</p>}
       <form className="grid" onSubmit={save}>
         <label>Name<input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} required /></label>
         <div className="row">

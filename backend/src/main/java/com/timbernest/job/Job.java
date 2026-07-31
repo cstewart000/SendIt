@@ -24,6 +24,9 @@ public class Job {
     private String nestingJson = "{}";
     @Column(columnDefinition = "TEXT")
     private String quoteJson;
+    /** JSON: disabled fixing ids, tabs/fixings toggles for this job. */
+    @Column(columnDefinition = "TEXT")
+    private String camJson = "{}";
     private String gcodePath;
     private String setupSheetPath;
     private Instant createdAt = Instant.now();
@@ -52,6 +55,8 @@ public class Job {
     public void setNestingJson(String nestingJson) { this.nestingJson = nestingJson; }
     public String getQuoteJson() { return quoteJson; }
     public void setQuoteJson(String quoteJson) { this.quoteJson = quoteJson; }
+    public String getCamJson() { return camJson; }
+    public void setCamJson(String camJson) { this.camJson = camJson; }
     public String getGcodePath() { return gcodePath; }
     public void setGcodePath(String gcodePath) { this.gcodePath = gcodePath; }
     public String getSetupSheetPath() { return setupSheetPath; }
