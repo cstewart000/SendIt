@@ -9,8 +9,10 @@ import java.util.Map;
 public final class JobDtos {
     private JobDtos() {}
 
-    public record CreateJobRequest(Long machineId, Long materialId, Long toolId,
+    public record CreateJobRequest(String title, Long machineId, Long materialId, Long toolId,
                                    Double marginMm, Double partGapMm) {}
+
+    public record UpdateJobRequest(String title) {}
 
     public record PartQty(Long partId, Integer quantity) {}
 
@@ -32,8 +34,11 @@ public final class JobDtos {
     public record NestShape(Long jobPartId, double nativeWidth, double nativeHeight,
                             List<ContourPath> contours) {}
 
-    public record JobView(Long id, JobStatus status, Long machineId, Long materialId, Long toolId,
-                          boolean nestingLocked, double marginMm, double partGapMm,
+    public record JobSummary(int partCount, int sheetCount, double partsAreaMm2,
+                             Double cycleMinutes, Double cost, String currency) {}
+
+    public record JobView(Long id, String title, JobStatus status, Long machineId, Long materialId,
+                          Long toolId, boolean nestingLocked, double marginMm, double partGapMm,
                           List<JobPart> parts, Map<String, Object> nesting, Map<String, Object> quote,
-                          boolean hasGcode) {}
+                          boolean hasGcode, JobSummary summary) {}
 }

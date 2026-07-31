@@ -7,12 +7,17 @@ public class PricingRule {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+    private Long machineId;
     private String name;
     private String ruleKey;
+    /** Quoted: bare VALUE is reserved in H2 and some SQL dialects. */
+    @Column(name = "\"value\"")
     private double value;
     private String description;
 
     public Long getId() { return id; }
+    public Long getMachineId() { return machineId; }
+    public void setMachineId(Long machineId) { this.machineId = machineId; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
     public String getRuleKey() { return ruleKey; }

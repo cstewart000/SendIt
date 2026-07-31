@@ -36,14 +36,35 @@ public class JobService {
     public JobDtos.JobView create(AppUser user, JobDtos.CreateJobRequest req) {
         Job job = new Job();
         job.setOwnerId(user.getId());
+        job.setTitle(cleanTitle(req.title(), null));
         job.setMachineId(req.machineId());
         job.setMaterialId(req.materialId());
         job.setToolId(req.toolId());
         if (req.marginMm() != null) job.setMarginMm(req.marginMm());
         if (req.partGapMm() != null) job.setPartGapMm(req.partGapMm());
         jobs.save(job);
-        log.info("Created job id={}", job.getId());
+        if (job.getTitle() == null || job.getTitle().isBlank()) {
+            job.setTitle("Job #" + job.getId());
+            jobs.save(job);
+        }
+        log.info("Created job id={} title={}", job.getId(), job.getTitle());
         return view(job);
+    }
+
+    public JobDtos.JobView update(AppUser user, Long id, JobDtos.UpdateJobRequest req) {
+        Job job = owned(user, id);
+        job.setTitle(cleanTitle(req.title(), "Job #" + id));
+        job.touch();
+        jobs.save(job);
+        log.info("Updated job {} title={}", id, job.getTitle());
+        return view(job);
+    }
+
+    private String cleanTitle(String title, String fallback) {
+        if (title == null) return fallback;
+        String t = title.trim();
+        if (t.isEmpty()) return fallback;
+        return t.length() > 120 ? t.substring(0, 120) : t;
     }
 
     public List<JobDtos.JobView> listMine(AppUser user) {
@@ -152,11 +173,37 @@ public class JobService {
     }
 
     public JobDtos.JobView view(Job job) {
-        return new JobDtos.JobView(job.getId(), job.getStatus(), job.getMachineId(), job.getMaterialId(),
-                job.getToolId(), job.isNestingLocked(), job.getMarginMm(), job.getPartGapMm(),
-                parts.findByJobId(job.getId()), readMap(job.getNestingJson()),
-                job.getQuoteJson() == null ? null : readMap(job.getQuoteJson()),
-                job.getGcodePath() != null);
+        String title = job.getTitle() == null || job.getTitle().isBlank()
+                ? "Job #" + job.getId() : job.getTitle();
+        List<JobPart> jobParts = parts.findByJobId(job.getId());
+        Map<String, Object> nesting = readMap(job.getNestingJson());
+        Map<String, Object> quote = job.getQuoteJson() == null ? null : readMap(job.getQuoteJson());
+        JobDtos.JobSummary summary = summarize(jobParts, nesting, quote);
+        log.info("Job {} summary parts={} sheets={} areaMm2={} cost={}",
+                job.getId(), summary.partCount(), summary.sheetCount(),
+                Math.round(summary.partsAreaMm2()), summary.cost());
+        return new JobDtos.JobView(job.getId(), title, job.getStatus(), job.getMachineId(),
+                job.getMaterialId(), job.getToolId(), job.isNestingLocked(), job.getMarginMm(),
+                job.getPartGapMm(), jobParts, nesting, quote,
+                job.getGcodePath() != null, summary);
+    }
+
+    private JobDtos.JobSummary summarize(List<JobPart> jobParts, Map<String, Object> nesting,
+                                         Map<String, Object> quote) {
+        int partCount = jobParts.stream().mapToInt(JobPart::getQuantity).sum();
+        double area = jobParts.stream()
+                .mapToDouble(p -> p.getWidthMm() * p.getHeightMm() * p.getQuantity()).sum();
+        int sheets = nesting.get("sheetCount") instanceof Number n ? n.intValue() : 0;
+        Double cycle = null;
+        Double cost = null;
+        String currency = null;
+        if (quote != null) {
+            if (quote.get("cycleMinutes") instanceof Number n) cycle = n.doubleValue();
+            if (quote.get("total") instanceof Number n) cost = n.doubleValue();
+            if (quote.get("currency") instanceof String s) currency = s;
+        }
+        return new JobDtos.JobSummary(partCount, sheets, Math.round(area * 100.0) / 100.0,
+                cycle, cost, currency);
     }
 
     @SuppressWarnings("unchecked")

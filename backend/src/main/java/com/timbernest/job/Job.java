@@ -11,6 +11,7 @@ public class Job {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     private Long ownerId;
+    private String title;
     private Long machineId;
     private Long materialId;
     private Long toolId;
@@ -31,6 +32,8 @@ public class Job {
     public Long getId() { return id; }
     public Long getOwnerId() { return ownerId; }
     public void setOwnerId(Long ownerId) { this.ownerId = ownerId; }
+    public String getTitle() { return title; }
+    public void setTitle(String title) { this.title = title; }
     public Long getMachineId() { return machineId; }
     public void setMachineId(Long machineId) { this.machineId = machineId; }
     public Long getMaterialId() { return materialId; }

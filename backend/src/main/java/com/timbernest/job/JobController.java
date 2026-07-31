@@ -36,6 +36,12 @@ public class JobController {
         return jobs.get(user, id);
     }
 
+    @PatchMapping("/{id}")
+    public JobDtos.JobView update(@AuthenticationPrincipal AppUser user, @PathVariable Long id,
+                                  @RequestBody JobDtos.UpdateJobRequest req) {
+        return jobs.update(user, id, req);
+    }
+
     @GetMapping("/{id}/nest-shapes")
     public List<JobDtos.NestShape> nestShapes(@AuthenticationPrincipal AppUser user, @PathVariable Long id) {
         return workflow.nestShapes(user, id);

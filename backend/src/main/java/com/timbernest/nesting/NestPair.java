@@ -40,7 +40,7 @@ public final class NestPair {
                 }
             }
         }
-        log.info("Pair layout {}x{} area={} (side-by-side {})",
+        log.debug("Pair layout {}x{} area={} (side-by-side {})",
                 Math.round(best.width()), Math.round(best.height()),
                 Math.round(best.area()), Math.round(sideBySide));
         return best;

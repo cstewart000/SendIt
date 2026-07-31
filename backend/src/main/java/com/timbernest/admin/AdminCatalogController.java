@@ -41,8 +41,9 @@ public class AdminCatalogController {
 
     @PostMapping("/tools")
     public Tool saveTool(@AuthenticationPrincipal AppUser admin, @RequestBody Tool t) {
+        if (t.getMachineId() == null) throw new IllegalArgumentException("Tool requires machineId");
         Tool saved = tools.save(t);
-        audit(admin, "UPSERT_TOOL", "id=" + saved.getId());
+        audit(admin, "UPSERT_TOOL", "machine=" + saved.getMachineId() + " id=" + saved.getId());
         return saved;
     }
 
@@ -61,19 +62,39 @@ public class AdminCatalogController {
 
     @PostMapping("/processes")
     public ProcessDef saveProcess(@AuthenticationPrincipal AppUser admin, @RequestBody ProcessDef p) {
+        if (p.getMachineId() == null) throw new IllegalArgumentException("Process requires machineId");
         ProcessDef saved = processes.save(p);
-        audit(admin, "UPSERT_PROCESS", "id=" + saved.getId());
+        audit(admin, "UPSERT_PROCESS", "machine=" + saved.getMachineId() + " id=" + saved.getId());
         return saved;
     }
 
     @GetMapping("/pricing")
-    public List<PricingRule> pricing() { return pricing.findAll(); }
+    public List<PricingRule> pricing(@RequestParam(required = false) Long machineId) {
+        return machineId == null ? pricing.findAll() : pricing.findByMachineId(machineId);
+    }
 
     @PostMapping("/pricing")
     public PricingRule savePricing(@AuthenticationPrincipal AppUser admin, @RequestBody PricingRule r) {
+        if (r.getMachineId() == null) {
+            throw new IllegalArgumentException("Pricing rule requires machineId");
+        }
         PricingRule saved = pricing.save(r);
-        audit(admin, "UPSERT_PRICING", "key=" + saved.getRuleKey() + " value=" + saved.getValue());
+        audit(admin, "UPSERT_PRICING", "machine=" + saved.getMachineId()
+                + " key=" + saved.getRuleKey() + " value=" + saved.getValue());
         return saved;
+    }
+
+    @GetMapping("/machines/{id}/tools")
+    public List<Tool> machineTools(@PathVariable Long id) { return tools.findByMachineId(id); }
+
+    @GetMapping("/machines/{id}/processes")
+    public List<ProcessDef> machineProcesses(@PathVariable Long id) {
+        return processes.findByMachineId(id);
+    }
+
+    @GetMapping("/machines/{id}/pricing")
+    public List<PricingRule> machinePricing(@PathVariable Long id) {
+        return pricing.findByMachineId(id);
     }
 
     @GetMapping("/audit")

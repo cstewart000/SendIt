@@ -70,13 +70,13 @@ export function PartPicker({ designId, versionId, selection, onChange, onPartsLo
 
   return (
     <div className="grid">
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="row" style={{ flexWrap: 'wrap' }}>
         <button type="button" className="ghost" onClick={() => selectAll(1)}>Select all ×1</button>
         <button type="button" className="ghost" onClick={() => onChange({})}>Clear</button>
-        <input type="number" min={1} value={bulkQty} style={{ width: 72 }}
+        <input className="qty" type="number" min={1} value={bulkQty}
           onChange={e => setBulkQty(Number(e.target.value) || 1)} title="Bulk quantity" />
         <button type="button" className="ghost" onClick={applyBulk}>
-          Set all{selectedCount ? ' selected' : ''} to ×{bulkQty}
+          Set ×{bulkQty}
         </button>
       </div>
       <p className="muted">{selectedCount} part type(s), {totalQty} total pieces</p>
@@ -91,7 +91,7 @@ export function PartPicker({ designId, versionId, selection, onChange, onPartsLo
           </span>
           <label style={{ display: 'flex', gap: 4, alignItems: 'center', margin: 0 }}>
             Qty
-            <input type="number" min={0} style={{ width: 64 }}
+            <input className="qty" type="number" min={0}
               value={selection[p.id] ?? 0}
               onChange={e => setQty(p.id, Number(e.target.value) || 0)} />
           </label>

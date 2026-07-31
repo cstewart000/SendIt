@@ -1,0 +1,21 @@
+server:
+  port: 0
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:sendit;MODE=PostgreSQL;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    database-platform: org.hibernate.dialect.H2Dialect
+    open-in-view: false
+
+sendit:
+  jwt-secret: sendit-test-secret-at-least-32-characters!!
+  jwt-expiry-hours: 1
+  storage-path: ./build/test-storage
+  file-max-mb: 5
+  seed: false

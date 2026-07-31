@@ -21,7 +21,7 @@ export function Viewer2D({ contours = [], issues = [], nests, sheet }: Props) {
     if (!ctx) return
     const w = canvas.width, h = canvas.height
     ctx.clearRect(0, 0, w, h)
-    ctx.fillStyle = '#15110d'
+    ctx.fillStyle = '#101826'
     ctx.fillRect(0, 0, w, h)
 
     let minX = 0, minY = 0, maxX = sheet?.width || 100, maxY = sheet?.height || 100
@@ -40,11 +40,11 @@ export function Viewer2D({ contours = [], issues = [], nests, sheet }: Props) {
     const ty = (p: Pt) => h - pad - (p.y - minY) * s
 
     if (sheet) {
-      ctx.strokeStyle = '#6b5238'
+      ctx.strokeStyle = '#3d4f66'
       ctx.strokeRect(tx({ x: 0, y: 0 }), ty({ x: 0, y: sheet.height }), sheet.width * s, sheet.height * s)
     }
 
-    ctx.strokeStyle = '#e0c29a'
+    ctx.strokeStyle = '#7dd3fc'
     ctx.lineWidth = 1.5
     for (const c of contours) {
       if (!c.points?.length) continue
@@ -64,12 +64,13 @@ export function Viewer2D({ contours = [], issues = [], nests, sheet }: Props) {
 
     if (nests) {
       for (const n of nests.filter(x => (x.sheetIndex || 0) === 0)) {
-        ctx.fillStyle = 'rgba(201,133,58,0.2)'
-        ctx.strokeStyle = '#c9853a'
+        ctx.fillStyle = 'rgba(59,130,196,0.18)'
+        ctx.strokeStyle = '#3b82c4'
         const x = tx({ x: n.x, y: n.y }), y = ty({ x: n.x, y: n.y + n.height })
         ctx.fillRect(x, y, n.width * s, n.height * s)
         ctx.strokeRect(x, y, n.width * s, n.height * s)
-        ctx.fillStyle = '#f3ebe1'
+        ctx.fillStyle = '#e8eef5'
+        ctx.font = '12px "IBM Plex Sans", Helvetica, Arial, sans-serif'
         ctx.fillText(n.label || 'Part', x + 4, y + 14)
       }
     }

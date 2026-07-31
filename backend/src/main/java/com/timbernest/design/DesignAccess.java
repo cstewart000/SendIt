@@ -1,10 +1,13 @@
 package com.timbernest.design;
 
 import com.timbernest.common.ApiException;
+import com.timbernest.geometry.DwgParser;
 import com.timbernest.geometry.DxfParser;
 import com.timbernest.geometry.JsonUtil;
 import com.timbernest.geometry.model.GeometryModel;
 import com.timbernest.user.AppUser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
@@ -13,16 +16,19 @@ import java.util.Locale;
 
 @Component
 public class DesignAccess {
+    private static final Logger log = LoggerFactory.getLogger(DesignAccess.class);
     private final DesignRepository designs;
     private final DesignVersionRepository versions;
     private final DxfParser dxfParser;
+    private final DwgParser dwgParser;
     private final JsonUtil json;
 
     public DesignAccess(DesignRepository designs, DesignVersionRepository versions,
-                        DxfParser dxfParser, JsonUtil json) {
+                        DxfParser dxfParser, DwgParser dwgParser, JsonUtil json) {
         this.designs = designs;
         this.versions = versions;
         this.dxfParser = dxfParser;
+        this.dwgParser = dwgParser;
         this.json = json;
     }
 
@@ -42,15 +48,15 @@ public class DesignAccess {
     }
 
     public GeometryModel loadOrParse(DesignVersion v) {
-        if (v.getGeometryJson() != null && !v.getGeometryJson().isBlank()) {
+        String name = v.getOriginalFilename() == null ? "" : v.getOriginalFilename().toLowerCase(Locale.ROOT);
+        boolean dwg = name.endsWith(".dwg");
+        // Always re-parse DWG from disk — binary parse quality improves with cleaner filters.
+        if (!dwg && v.getGeometryJson() != null && !v.getGeometryJson().isBlank()) {
             return json.toModel(v.getGeometryJson());
         }
-        String name = v.getOriginalFilename().toLowerCase(Locale.ROOT);
-        if (name.endsWith(".dwg")) {
-            throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "DWG native parse not available in Phase 1 – please re-export as DXF");
-        }
-        GeometryModel model = dxfParser.parse(Path.of(v.getOriginalPath()));
+        Path path = Path.of(v.getOriginalPath());
+        log.info("Parsing design version {} file={}", v.getId(), name);
+        GeometryModel model = dwg ? dwgParser.parse(path) : dxfParser.parse(path);
         v.setGeometryJson(json.toJson(model));
         versions.save(v);
         return model;

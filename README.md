@@ -42,6 +42,7 @@ Open http://localhost:5173
 | `corner-box.dxf` | Panel with L-shaped pocket |
 | `nest-side-a.dxf` / `nest-shelf.dxf` / `nest-cleat.dxf` | Multi-part nesting kit |
 | `bracket.dxf` | Simple closed plate + holes |
+| `demo-r2000.dwg` | Sample AutoCAD R2000 DWG (native parse) |
 
 ### API docs
 http://localhost:8081/swagger-ui.html
@@ -66,4 +67,16 @@ http://localhost:8081/swagger-ui.html
   ```
 
 ## Phase 1 limits
-DWG native parse, payments, shipping, pocketing/drill CAM, and public API are out of scope.
+Payments, shipping, pocketing/drill CAM, and public API are out of scope.
+DWG upload is supported (R2000–R2018 best-effort via native parse); complex entities may need DXF export.
+
+## Manufacturing notes (current)
+- Nesting **fails closed**: if any piece cannot fit the sheet, nest returns `422` (no partial nest).
+- G-code is **offline tool-radius offset** (G40), holes before outer profile, multi-pass depth, machine safe-Z.
+- Quotes use the same multi-pass path metrics as CAM (not single-pass contour length).
+- Set `JWT_SECRET` in production/Railway — startup refuses the dev default when Railway env is detected.
+
+## Backend tests
+```bash
+cd backend && ./gradlew test
+```

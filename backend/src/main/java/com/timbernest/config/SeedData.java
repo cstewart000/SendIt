@@ -6,6 +6,7 @@ import com.timbernest.user.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -15,6 +16,7 @@ public class SeedData {
     private static final Logger log = LoggerFactory.getLogger(SeedData.class);
 
     @Bean
+    @ConditionalOnProperty(name = "sendit.seed", havingValue = "true", matchIfMissing = true)
     CommandLineRunner seed(UserRepository users, MachineRepository machines, ToolRepository tools,
                            MaterialRepository materials, ProcessRepository processes,
                            PricingRuleRepository pricing, PasswordEncoder encoder) {
@@ -35,7 +37,23 @@ public class SeedData {
                 log.info("Seeded users admin@sendit.local / hobby@sendit.local");
             }
             if (machines.count() == 0) seedShop(machines, tools, materials, processes, pricing);
+            backfillPricing(machines, pricing);
         };
+    }
+
+    /** Attach orphan global pricing rows to the first machine. */
+    private void backfillPricing(MachineRepository machines, PricingRuleRepository pricing) {
+        if (machines.count() == 0) return;
+        Long mid = machines.findAll().get(0).getId();
+        int n = 0;
+        for (PricingRule r : pricing.findAll()) {
+            if (r.getMachineId() == null) {
+                r.setMachineId(mid);
+                pricing.save(r);
+                n++;
+            }
+        }
+        if (n > 0) log.info("Backfilled {} pricing rules onto machineId={}", n, mid);
     }
 
     private void seedShop(MachineRepository machines, ToolRepository tools, MaterialRepository materials,
@@ -56,14 +74,15 @@ public class SeedData {
         p.setMachineId(m.getId());
         p.setMaterialId(mat.getId());
         processes.save(p);
-        saveRule(pricing, "SETUP_FEE", "Setup fee", 25);
-        saveRule(pricing, "MIN_ORDER", "Minimum order", 40);
-        saveRule(pricing, "MATERIAL_MARKUP", "Material markup multiplier", 1.0);
-        log.info("Seeded machine/material/tool/pricing");
+        saveRule(pricing, m.getId(), "SETUP_FEE", "Setup fee", 25);
+        saveRule(pricing, m.getId(), "MIN_ORDER", "Minimum order", 40);
+        saveRule(pricing, m.getId(), "MATERIAL_MARKUP", "Material markup multiplier", 1.0);
+        log.info("Seeded machine/material/tool/pricing machineId={}", m.getId());
     }
 
-    private void saveRule(PricingRuleRepository repo, String key, String name, double value) {
+    private void saveRule(PricingRuleRepository repo, Long machineId, String key, String name, double value) {
         PricingRule r = new PricingRule();
+        r.setMachineId(machineId);
         r.setRuleKey(key);
         r.setName(name);
         r.setValue(value);

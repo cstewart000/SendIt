@@ -31,9 +31,9 @@ export function NestEditor({ sheet, placements, shapes = {}, locked, onChange }:
     const tx = (x: number) => pad + x * s
     const ty = (y: number) => H - pad - y * s
     c.clearRect(0, 0, W, H)
-    c.fillStyle = '#15110d'
+    c.fillStyle = '#101826'
     c.fillRect(0, 0, W, H)
-    c.strokeStyle = '#6b5238'
+    c.strokeStyle = '#3d4f66'
     c.strokeRect(tx(0), ty(sheet.height), sheet.width * s, sheet.height * s)
     placements.filter(p => (p.sheetIndex || 0) === 0).forEach((n, i) => {
       const shape = n.jobPartId != null ? shapes[n.jobPartId] : undefined

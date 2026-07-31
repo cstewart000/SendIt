@@ -31,7 +31,13 @@ export function DesignsPage() {
 
   return (
     <Shell>
-      <div className="grid two">
+      <div className="grid two action-first">
+        <form className="panel grid" onSubmit={upload}>
+          <h2>Upload DXF / DWG</h2>
+          <label>Name<input value={name} onChange={e => setName(e.target.value)} placeholder="Optional" /></label>
+          <label>File<input type="file" accept=".dxf,.dwg" onChange={e => setFile(e.target.files?.[0] || null)} /></label>
+          <button type="submit" disabled={!file}>Start analysis</button>
+        </form>
         <div className="panel">
           <h2>Your designs</h2>
           {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
@@ -45,12 +51,6 @@ export function DesignsPage() {
             {!items.length && <p className="muted">No designs yet — upload a DXF to begin.</p>}
           </div>
         </div>
-        <form className="panel grid" onSubmit={upload}>
-          <h2>Upload DXF / DWG</h2>
-          <label>Name<input value={name} onChange={e => setName(e.target.value)} placeholder="Optional" /></label>
-          <label>File<input type="file" accept=".dxf,.dwg" onChange={e => setFile(e.target.files?.[0] || null)} /></label>
-          <button type="submit" disabled={!file}>Start analysis</button>
-        </form>
       </div>
     </Shell>
   )

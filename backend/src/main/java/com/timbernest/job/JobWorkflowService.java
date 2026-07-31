@@ -22,6 +22,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import tools.jackson.databind.ObjectMapper;
 
 import java.nio.file.Files;
 import java.util.*;
@@ -45,6 +46,7 @@ public class JobWorkflowService {
     private final GCodeGenerator gcode;
     private final SetupSheetWriter setupSheets;
     private final FileStorageService storage;
+    private final ObjectMapper mapper;
 
     public JobWorkflowService(JobService jobs, JobRepository jobRepo, JobPartRepository parts,
                               MachineRepository machines, MaterialRepository materials,
@@ -52,12 +54,13 @@ public class JobWorkflowService {
                               DesignVersionRepository versions, DesignPartRepository designParts,
                               DesignAccess designAccess, JsonUtil json, NestingService nesting,
                               QuoteService quotes, GCodeGenerator gcode,
-                              SetupSheetWriter setupSheets, FileStorageService storage) {
+                              SetupSheetWriter setupSheets, FileStorageService storage,
+                              ObjectMapper mapper) {
         this.jobs = jobs; this.jobRepo = jobRepo; this.parts = parts; this.machines = machines;
         this.materials = materials; this.tools = tools; this.pricing = pricing;
         this.versions = versions; this.designParts = designParts; this.designAccess = designAccess;
         this.json = json; this.nesting = nesting; this.quotes = quotes; this.gcode = gcode;
-        this.setupSheets = setupSheets; this.storage = storage;
+        this.setupSheets = setupSheets; this.storage = storage; this.mapper = mapper;
     }
 
     public JobDtos.JobView nest(AppUser user, Long jobId) {
@@ -198,8 +201,7 @@ public class JobWorkflowService {
 
     private NestResult readNest(Job job) {
         try {
-            return new tools.jackson.databind.json.JsonMapper()
-                    .readValue(job.getNestingJson(), NestResult.class);
+            return mapper.readValue(job.getNestingJson(), NestResult.class);
         } catch (Exception e) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid nesting data");
         }

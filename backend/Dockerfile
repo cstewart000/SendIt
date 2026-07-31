@@ -2,6 +2,7 @@ FROM eclipse-temurin:17-jdk-jammy AS build
 WORKDIR /app
 COPY gradlew settings.gradle build.gradle ./
 COPY gradle ./gradle
+COPY libs ./libs
 RUN chmod +x gradlew
 COPY src ./src
 RUN ./gradlew bootJar --no-daemon -x test

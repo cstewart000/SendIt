@@ -12,7 +12,8 @@ type JobPart = {
   designVersionId: number; designPartId?: number
 }
 type Job = {
-  id: number; status: string; nestingLocked: boolean; hasGcode: boolean; parts?: JobPart[]
+  id: number; title?: string; status: string; nestingLocked: boolean; hasGcode: boolean
+  parts?: JobPart[]
   nesting?: {
     sheetWidth: number; sheetHeight: number; sheetCount: number
     placements: NestPlacement[]
@@ -31,6 +32,7 @@ export function JobPage() {
   const [selection, setSelection] = useState<PartSelection>({})
   const [allQty, setAllQty] = useState(1)
   const [error, setError] = useState('')
+  const [titleDraft, setTitleDraft] = useState('')
   const [shapes, setShapes] = useState<Record<number, NestShape>>({})
   const nestSave = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -45,7 +47,17 @@ export function JobPage() {
   async function reload() {
     const j = await api<Job>(`/jobs/${id}`)
     setJob(j)
+    setTitleDraft(j.title || `Job #${j.id}`)
     if (j.parts?.length) await loadShapes().catch(console.error)
+  }
+
+  async function saveTitle() {
+    const title = titleDraft.trim() || `Job #${id}`
+    setJob(await api<Job>(`/jobs/${id}`, {
+      method: 'PATCH', body: JSON.stringify({ title }),
+    }))
+    setTitleDraft(title)
+    console.log('[job] title', title)
   }
 
   useEffect(() => {
@@ -53,7 +65,14 @@ export function JobPage() {
     api<DesignSum[]>('/designs').then(setDesigns).catch(console.error)
   }, [id])
 
-  async function pickDesign(did: number) {
+  async function pickDesign(raw: string) {
+    if (!raw) {
+      setDesignId('')
+      setVersionId('')
+      setSelection({})
+      return
+    }
+    const did = Number(raw)
     setDesignId(did)
     setSelection({})
     const d = await api<Detail>(`/designs/${did}`)
@@ -68,6 +87,8 @@ export function JobPage() {
     setJob(await api<Job>(`/jobs/${id}/parts`, {
       method: 'POST', body: JSON.stringify({ designVersionId: versionId, quantities }),
     }))
+    setSelection({})
+    console.log('[job] added parts', quantities.length)
     await loadShapes().catch(console.error)
   }
 
@@ -120,7 +141,15 @@ export function JobPage() {
       {error && <p style={{ color: 'var(--danger)' }}>{error}</p>}
       <div className="grid two">
         <div className="panel">
-          <h2>Job #{job?.id} — {job?.status}</h2>
+          <label>Job title
+            <div className="row">
+              <input value={titleDraft} onChange={e => setTitleDraft(e.target.value)}
+                onBlur={saveTitle} maxLength={120}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); saveTitle() } }} />
+              <button type="button" className="ghost" onClick={saveTitle}>Save</button>
+            </div>
+          </label>
+          <p className="muted">#{job?.id} · {job?.status}</p>
           {job?.nesting ? (
             <NestEditor
               sheet={{ width: job.nesting.sheetWidth, height: job.nesting.sheetHeight }}
@@ -135,8 +164,8 @@ export function JobPage() {
           <p className="muted">Sheets: {job?.nesting?.sheetCount ?? 0}</p>
           <h3>Parts on job</h3>
           {!job?.nestingLocked && (job?.parts?.length ?? 0) > 0 && (
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
-              <input type="number" min={1} value={allQty} style={{ width: 72 }}
+            <div className="row" style={{ marginBottom: 8 }}>
+              <input className="qty" type="number" min={1} value={allQty}
                 onChange={e => setAllQty(Number(e.target.value) || 1)} />
               <button type="button" className="ghost" onClick={setAllJobQty}>Set all parts to ×{allQty}</button>
             </div>
@@ -145,7 +174,7 @@ export function JobPage() {
             <div key={p.id} className="issue" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
               <span style={{ flex: 1 }}>{p.label} — {p.widthMm.toFixed(0)}×{p.heightMm.toFixed(0)} mm</span>
               {job?.nestingLocked ? <span>×{p.quantity}</span> : (
-                <input type="number" min={1} style={{ width: 64 }} defaultValue={p.quantity}
+                <input className="qty" type="number" min={1} defaultValue={p.quantity}
                   key={`${p.id}-${p.quantity}`}
                   onBlur={e => setJobPartQty(p.id, Number(e.target.value) || 1)} />
               )}
@@ -158,7 +187,8 @@ export function JobPage() {
             <>
               <h3>Add from designs</h3>
               <label>Design
-                <select value={designId} onChange={e => pickDesign(Number(e.target.value))}>
+                <select value={designId === '' ? '' : String(designId)}
+                  onChange={e => pickDesign(e.target.value)}>
                   <option value="">Select…</option>
                   {designs.map(d => (
                     <option key={d.id} value={d.id}>
@@ -167,12 +197,12 @@ export function JobPage() {
                   ))}
                 </select>
               </label>
-              {designId && versionId && (
+              {designId !== '' && versionId !== '' ? (
                 <PartPicker designId={designId} versionId={Number(versionId)}
                   selection={selection} onChange={setSelection} />
-              )}
+              ) : null}
               <button className="ghost" onClick={addParts} disabled={!addTotal}>
-                Add to job ({Object.keys(selection).length} types, {addTotal} pieces)
+                Add to job{addTotal ? ` · ${addTotal} pcs` : ''}
               </button>
             </>
           )}

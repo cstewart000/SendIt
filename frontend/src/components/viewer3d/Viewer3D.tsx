@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
+import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { timberMaterial } from './timberMaterial'
 
 type Pt = { x: number; y: number }
 type Contour = { closed?: boolean; points: Pt[] }
@@ -12,16 +14,20 @@ export function Viewer3D({ contours = [], thickness = 18 }: { contours?: Contour
     if (!el) return
     const w = el.clientWidth || 480, h = 320
     const scene = new THREE.Scene()
-    scene.background = new THREE.Color('#17120e')
+    scene.background = new THREE.Color('#ffffff')
     const camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 10000)
     const renderer = new THREE.WebGLRenderer({ antialias: true })
     renderer.setSize(w, h)
     el.innerHTML = ''
     el.appendChild(renderer.domElement)
 
-    const light = new THREE.DirectionalLight(0xffe0b8, 1.2)
-    light.position.set(2, 4, 3)
-    scene.add(light, new THREE.AmbientLight(0x665544, 0.7))
+    const controls = new OrbitControls(camera, renderer.domElement)
+    controls.enableDamping = true
+    controls.dampingFactor = 0.08
+
+    const key = new THREE.DirectionalLight(0xfff5e8, 1.2)
+    key.position.set(2, 4, 3)
+    scene.add(key, new THREE.AmbientLight(0xfff8f0, 0.7))
 
     const shape = new THREE.Shape()
     const c = contours.find(x => x.closed && x.points.length > 2) || contours[0]
@@ -30,31 +36,28 @@ export function Viewer3D({ contours = [], thickness = 18 }: { contours?: Contour
       shape.closePath()
       const geo = new THREE.ExtrudeGeometry(shape, { depth: thickness, bevelEnabled: false })
       geo.center()
-      const mat = new THREE.MeshStandardMaterial({ color: '#c9853a', roughness: 0.75, metalness: 0.05 })
-      const mesh = new THREE.Mesh(geo, mat)
+      const mesh = new THREE.Mesh(geo, timberMaterial())
       mesh.rotation.x = -Math.PI / 2
       scene.add(mesh)
-      const box = new THREE.Box3().setFromObject(mesh)
-      const size = box.getSize(new THREE.Vector3()).length()
+      const size = new THREE.Box3().setFromObject(mesh).getSize(new THREE.Vector3()).length()
       camera.position.set(size * 0.7, size * 0.6, size * 0.7)
-      camera.lookAt(0, 0, 0)
     } else {
       camera.position.set(120, 100, 120)
-      camera.lookAt(0, 0, 0)
     }
+    camera.lookAt(0, 0, 0)
+    controls.target.set(0, 0, 0)
 
-    let frame = 0
     let raf = 0
     const animate = () => {
-      frame++
-      scene.rotation.y = Math.min(frame / 60, 1) * 0.35 + frame * 0.002
+      controls.update()
       renderer.render(scene, camera)
       raf = requestAnimationFrame(animate)
     }
     animate()
-    console.log('[viewer3d] mounted contours=', contours.length)
+    console.log('[viewer3d] orbit timber contours=', contours.length)
     return () => {
       cancelAnimationFrame(raf)
+      controls.dispose()
       renderer.dispose()
       el.innerHTML = ''
     }

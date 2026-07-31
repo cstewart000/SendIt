@@ -1,13 +1,16 @@
 package com.timbernest.nesting;
 
+import com.timbernest.common.ApiException;
 import com.timbernest.geometry.model.GeometryModel;
 import com.timbernest.geometry.model.Vec2;
 import com.timbernest.job.JobPart;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class NestingService {
@@ -21,48 +24,50 @@ public class NestingService {
         result.setMargin(margin);
         result.setGap(gap);
 
-        List<Unit> units = new ArrayList<>();
+        List<NestBlf.Piece> pieces = new ArrayList<>();
+        Map<Long, Integer> seen = new HashMap<>();
         for (JobPart part : parts) {
             GeometryModel geo = geos.get(part.getId());
             List<Vec2> local = geo != null ? NestPoly.outerLocal(geo) : List.of();
-            double nw = part.getWidthMm(), nh = part.getHeightMm();
-            int left = part.getQuantity();
-            NestPair.Layout pair = null;
-            if (!part.isGrainSensitive() && left >= 2 && local.size() >= 3) {
-                pair = NestPair.bestLayout(local, nw, nh, gap);
-                if (pair.area() >= (nw * 2 + gap) * nh - 1) pair = null; // not denser
+            if (local.size() < 3 && part.getWidthMm() > 0 && part.getHeightMm() > 0) {
+                // AABB fallback so rectangular metadata-only parts still nest
+                local = List.of(
+                        new Vec2(0, 0),
+                        new Vec2(part.getWidthMm(), 0),
+                        new Vec2(part.getWidthMm(), part.getHeightMm()),
+                        new Vec2(0, part.getHeightMm()));
             }
-            while (pair != null && left >= 2) {
-                units.add(Unit.pair(part, pair));
-                left -= 2;
+            for (int i = 0; i < part.getQuantity(); i++) {
+                int n = seen.merge(part.getId(), 1, Integer::sum);
+                pieces.add(new NestBlf.Piece(part, local, rotations(part, n)));
             }
-            while (left-- > 0) units.add(Unit.single(part, pickRot(part, sheetW, margin)));
         }
-        units.sort(Comparator.comparingDouble(Unit::area).reversed());
+        pieces.sort(Comparator.comparingDouble(
+                (NestBlf.Piece p) -> p.part().getWidthMm() * p.part().getHeightMm()).reversed());
 
-        int sheet = 0;
-        double cursorX = margin, cursorY = margin, rowH = 0;
-        double usableW = sheetW - margin, usableH = sheetH - margin;
-        for (Unit u : units) {
-            if (cursorX + u.w > usableW) {
-                cursorX = margin;
-                cursorY += rowH + gap;
-                rowH = 0;
-            }
-            if (cursorY + u.h > usableH) {
-                sheet++;
-                cursorX = margin;
-                cursorY = margin;
-                rowH = 0;
-            }
-            for (NestPlacement pl : u.at(cursorX, cursorY, sheet)) result.getPlacements().add(pl);
-            cursorX += u.w + gap;
-            rowH = Math.max(rowH, u.h);
+        NestBlf.PackResult pack = NestBlf.pack(pieces, sheetW, sheetH, margin, gap);
+        if (!pack.complete()) {
+            String labels = pack.unplaced().stream().distinct().collect(Collectors.joining(", "));
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                    "Nesting incomplete — could not place: " + labels
+                            + " (check part size vs sheet " + Math.round(sheetW) + "×"
+                            + Math.round(sheetH) + " mm, margin " + margin + " mm)");
         }
-        result.setSheetCount(result.getPlacements().isEmpty() ? 0 : sheet + 1);
-        log.info("Nested {} pcs / {} units on {} sheets (pair-aware)",
-                result.getPlacements().size(), units.size(), result.getSheetCount());
+        result.getPlacements().addAll(pack.placements());
+        result.setSheetCount(pack.sheetCount());
+        log.info("Nested {} pcs on {} sheets (BLF true-shape)", pack.placements().size(),
+                result.getSheetCount());
         return result;
+    }
+
+    /**
+     * Search 0/180 first for interlocking, then 90/270 as fallback.
+     * Odd/even instances bias complementary flips.
+     */
+    private double[] rotations(JobPart part, int instance) {
+        if (part.isGrainSensitive()) return new double[]{0, 90};
+        boolean flip = instance % 2 == 0;
+        return flip ? new double[]{0, 180, 90, 270} : new double[]{180, 0, 270, 90};
     }
 
     /** Grain-only constraint; instances may differ (one-up/one-down). */
@@ -75,65 +80,6 @@ public class NestingService {
                     : (part != null ? part.getHeightMm() : pl.getHeight());
             if (part != null) pl.setGrainSensitive(part.isGrainSensitive());
             NestMath.applyOrientation(pl, pl.getRotationDeg(), nw, nh);
-        }
-    }
-
-    private double pickRot(JobPart part, double sheetW, double margin) {
-        if (!part.isGrainSensitive() && part.getHeightMm() > part.getWidthMm()
-                && part.getHeightMm() <= sheetW - 2 * margin) return 90;
-        return 0;
-    }
-
-    private record Unit(double w, double h, List<NestPlacement> relative) {
-        double area() { return w * h; }
-
-        List<NestPlacement> at(double x, double y, int sheet) {
-            List<NestPlacement> out = new ArrayList<>();
-            for (NestPlacement r : relative) {
-                NestPlacement pl = copy(r);
-                pl.setX(r.getX() + x);
-                pl.setY(r.getY() + y);
-                pl.setSheetIndex(sheet);
-                out.add(pl);
-            }
-            return out;
-        }
-
-        static Unit single(JobPart part, double rot) {
-            NestPlacement pl = base(part);
-            NestMath.applyOrientation(pl, rot, part.getWidthMm(), part.getHeightMm());
-            pl.setX(0); pl.setY(0);
-            return new Unit(pl.getWidth(), pl.getHeight(), List.of(pl));
-        }
-
-        static Unit pair(JobPart part, NestPair.Layout layout) {
-            NestPlacement a = base(part), b = base(part);
-            NestMath.applyOrientation(a, layout.a().rot(), part.getWidthMm(), part.getHeightMm());
-            NestMath.applyOrientation(b, layout.b().rot(), part.getWidthMm(), part.getHeightMm());
-            a.setX(layout.a().x()); a.setY(layout.a().y());
-            b.setX(layout.b().x()); b.setY(layout.b().y());
-            return new Unit(layout.width(), layout.height(), List.of(a, b));
-        }
-
-        static NestPlacement base(JobPart part) {
-            NestPlacement pl = new NestPlacement();
-            pl.setJobPartId(part.getId());
-            pl.setLabel(part.getLabel());
-            pl.setGrainSensitive(part.isGrainSensitive());
-            return pl;
-        }
-
-        static NestPlacement copy(NestPlacement r) {
-            NestPlacement pl = new NestPlacement();
-            pl.setJobPartId(r.getJobPartId());
-            pl.setLabel(r.getLabel());
-            pl.setGrainSensitive(r.isGrainSensitive());
-            pl.setNativeWidth(r.getNativeWidth());
-            pl.setNativeHeight(r.getNativeHeight());
-            pl.setRotationDeg(r.getRotationDeg());
-            pl.setWidth(r.getWidth());
-            pl.setHeight(r.getHeight());
-            return pl;
         }
     }
 }

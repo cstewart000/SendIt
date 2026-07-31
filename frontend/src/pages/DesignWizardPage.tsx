@@ -7,7 +7,7 @@ import { Viewer2D } from '../components/viewer2d/Viewer2D'
 import { Viewer3D } from '../components/viewer3d/Viewer3D'
 
 type Version = {
-  id: number; analysed: boolean; partCount?: number
+  id: number; analysed: boolean; partCount?: number; originalFilename?: string
   geometry?: { contours: { id?: string; closed?: boolean; points: { x: number; y: number }[] }[] }
   issues?: { id: string; category: string; severity: string; message: string; highlight?: { x: number; y: number }[] }[]
 }
@@ -44,9 +44,18 @@ export function DesignWizardPage() {
     Promise.all([reload(), api<Catalog>('/catalog')])
       .then(async ([d, c]) => {
         setCatalog(c)
-        if (d.versions[0] && !d.versions[0].analysed) {
-          await api(`/designs/${id}/versions/${d.versions[0].id}/analyse`, { method: 'POST' })
-          await reload()
+        if (d.versions[0]) {
+          const v = d.versions[0]
+          const fn = (v.originalFilename || '').toLowerCase()
+          const reparseKey = `dwg-linefix-v1-${v.id}`
+          const needsAnalyse = !v.analysed
+            || (fn.endsWith('.dwg') && !localStorage.getItem(reparseKey))
+          if (needsAnalyse) {
+            console.log('[wizard] analyse', v.id, fn)
+            await api(`/designs/${id}/versions/${v.id}/analyse`, { method: 'POST' })
+            if (fn.endsWith('.dwg')) localStorage.setItem(reparseKey, '1')
+            await reload()
+          }
         }
       })
       .catch(e => setError(e.message))
@@ -81,6 +90,7 @@ export function DesignWizardPage() {
     const job = await api<{ id: number }>('/jobs', {
       method: 'POST',
       body: JSON.stringify({
+        title: detail?.name || undefined,
         machineId: catalog.machines[0].id,
         materialId: catalog.materials[0].id,
         toolId: catalog.tools[0].id,
