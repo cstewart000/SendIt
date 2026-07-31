@@ -49,11 +49,17 @@ export function JobPage() {
     console.log('[job] nest shapes', list.length)
   }
 
+  function hasPlacements(j: Job | null | undefined): boolean {
+    const p = j?.nesting?.placements
+    return Array.isArray(p) && p.length > 0
+  }
+
   async function reload() {
     const j = await api<Job>(`/jobs/${id}`)
     setJob(j)
     setTitleDraft(j.title || `Job #${j.id}`)
     if (j.parts?.length) await loadShapes().catch(console.error)
+    if (hasPlacements(j)) await loadToolpath().catch(console.error)
   }
 
   async function saveTitle() {
@@ -66,15 +72,7 @@ export function JobPage() {
   }
 
   useEffect(() => {
-    reload()
-      .then(async () => {
-        // Load toolpath if already nested
-        try {
-          const j = await api<Job>(`/jobs/${id}`)
-          if (j.nesting?.placements?.length) await loadToolpath()
-        } catch { /* ignore */ }
-      })
-      .catch(e => setError(e.message))
+    reload().catch(e => setError(e.message))
     api<DesignSum[]>('/designs').then(setDesigns).catch(console.error)
   }, [id])
 
@@ -226,21 +224,41 @@ export function JobPage() {
             {job?.marginMm != null && ` · edge margin ${job.marginMm} mm`}
             {job?.partGapMm != null && ` · part gap ${job.partGapMm} mm`}
           </p>
-          {job?.nesting?.placements?.length ? (
-            <div style={{ marginTop: '1rem' }}>
-              <div className="row" style={{ marginBottom: 8 }}>
-                <h3 style={{ margin: 0, flex: 1 }}>G-code / toolpath</h3>
-                <button type="button" className="ghost" onClick={loadToolpath}>Refresh preview</button>
-              </div>
-              {toolpathErr && <p style={{ color: 'var(--danger)' }}>{toolpathErr}</p>}
+
+          {/* Always-visible toolpath panel */}
+          <div className="panel" style={{ marginTop: '1rem', padding: '1rem', border: '1px solid var(--line)' }}>
+            <div className="row" style={{ marginBottom: 8, flexWrap: 'wrap' }}>
+              <h3 style={{ margin: 0, flex: 1 }}>G-code / toolpath</h3>
+              <button type="button" className="ghost" onClick={loadToolpath}
+                disabled={!hasPlacements(job) || camBusy}>
+                {toolpath ? 'Refresh preview' : 'Load toolpath'}
+              </button>
+            </div>
+            {!hasPlacements(job) && (
+              <p className="muted" style={{ margin: '0 0 0.5rem' }}>
+                Add parts, then click <strong>Auto-nest</strong> (right) to generate nest + toolpath preview
+                (cuts, screw holes, tabs).
+              </p>
+            )}
+            {toolpathErr && <p style={{ color: 'var(--danger)' }}>{toolpathErr}</p>}
+            {hasPlacements(job) ? (
               <GCodeViewer
                 data={toolpath}
                 busy={camBusy}
                 onToggleFixing={toggleFixing}
                 onCamOptions={opts => patchCamOptions(opts)}
               />
-            </div>
-          ) : null}
+            ) : (
+              <div style={{
+                minHeight: 120, borderRadius: 8, background: '#0f1720', color: '#94a3b8',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
+                fontSize: '0.9rem', textAlign: 'center',
+              }}>
+                Toolpath canvas appears here after auto-nest
+              </div>
+            )}
+          </div>
+
           <h3>Parts on job</h3>
           {!job?.nestingLocked && (job?.parts?.length ?? 0) > 0 && (
             <div className="row" style={{ marginBottom: 8 }}>
@@ -285,8 +303,22 @@ export function JobPage() {
               </button>
             </>
           )}
-          <button onClick={nest} disabled={!job?.parts?.length}>Auto-nest</button>
-          <button className="ghost" onClick={lock} disabled={!job?.nesting?.placements?.length}>Lock nesting</button>
+          <button onClick={async () => {
+            setError('')
+            try {
+              await nest()
+            } catch (e) {
+              setError(e instanceof Error ? e.message : 'Nest failed')
+            }
+          }} disabled={!job?.parts?.length}>
+            Auto-nest
+          </button>
+          <button className="ghost" onClick={lock} disabled={!hasPlacements(job)}>Lock nesting</button>
+          {hasPlacements(job) && (
+            <button type="button" className="ghost" onClick={loadToolpath} disabled={camBusy}>
+              Show toolpath preview
+            </button>
+          )}
           <button className="ghost" onClick={quote} disabled={!job?.nestingLocked}>Generate quote</button>
           {job?.quote && (
             <div>
