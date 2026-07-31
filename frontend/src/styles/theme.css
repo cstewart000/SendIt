@@ -14,10 +14,10 @@
   --shadow: 0 8px 28px rgba(21, 32, 51, 0.08);
   --font: 'IBM Plex Sans', 'Helvetica Neue', Helvetica, Arial, sans-serif;
   --radius: 6px;
-  --canvas: #101826;
-  --canvas-line: #3d4f66;
-  --part: #3b82c4;
-  --part-sel: #7dd3fc;
+  --canvas: #ffffff;
+  --canvas-line: #000000;
+  --part: #111111;
+  --part-sel: #2563a8;
 }
 
 * { box-sizing: border-box; }
