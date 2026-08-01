@@ -11,21 +11,35 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * Inserts circular dog-bone arcs at internal corners so a round endmill can fully
- * clear square internal corners. Each dog-bone is a tessellated circular arc.
+ * CNC dog-bone fillets for internal corners.
  *
- * <p>Arcs cut INTO the part material (not out into free space), so a square male
- * feature can seat fully in a female internal corner.
+ * <h2>Why dog-bones</h2>
+ * A round endmill cannot cut a sharp internal corner (minimum radius = tool radius).
+ * Without relief, a square male feature will not seat fully. A dog-bone overcuts
+ * into the <b>part material</b> at that corner (Vectric / Fusion-style) so the mate fits.
  *
- * <ul>
- *   <li>Outer contours: concave corners → arc into the solid</li>
- *   <li>Holes: corners → arc into the surrounding solid (not the void)</li>
- * </ul>
+ * <h2>Geometry (classic cartoon dog-bone)</h2>
+ * At corner B with unit directions {@code u}, {@code v} along the two original edges
+ * toward the neighboring vertices:
+ * <pre>
+ *   setback  = tool radius r  (clamped to edge length)
+ *   p1       = B + u · setback     // still on original edge BA
+ *   p2       = B + v · setback     // still on original edge BC
+ *   center   = B
+ *   radius   = setback
+ *   arc      = major arc p1 → p2 that travels through SOLID material
+ * </pre>
+ * For a 90° free-space corner that is a 270° circular lobe of radius r into the solid.
+ *
+ * <h2>Critical rule</h2>
+ * Original straight edges are never moved or bent. Only the single corner vertex is
+ * replaced by the arc; endpoints lie exactly on the original edge segments, so every
+ * other point on those edges stays collinear with the design intent.
  */
 @Service
 public class DogBoneService {
     private static final Logger log = LoggerFactory.getLogger(DogBoneService.class);
-    private static final double MIN_EDGE = 0.5;
+    private static final double MIN_EDGE = 1.0;
 
     public record Result(int corners, double radiusMm) {}
 
@@ -41,18 +55,20 @@ public class DogBoneService {
                 Vec2 prev = pts.get((i - 1 + n) % n);
                 Vec2 cur = pts.get(i);
                 Vec2 next = pts.get((i + 1) % n);
-                double edgeIn = prev.dist(cur);
-                double edgeOut = cur.dist(next);
-                if (edgeIn < MIN_EDGE || edgeOut < MIN_EDGE) {
+                double lenIn = prev.dist(cur);
+                double lenOut = cur.dist(next);
+                if (lenIn < MIN_EDGE || lenOut < MIN_EDGE
+                        || !needsDogbone(prev, cur, next, ring.hole, ring.ccw)) {
+                    // Keep original vertex exactly — straight edges unchanged
                     out.add(cur);
                     continue;
                 }
-                double r = Math.min(rTool, Math.min(edgeIn, edgeOut) * 0.45);
-                if (r < 0.25 || !needsDogbone(prev, cur, next, ring.hole, ring.ccw)) {
+                double r = Math.min(rTool, Math.min(lenIn, lenOut) * 0.4);
+                if (r < 0.3) {
                     out.add(cur);
                     continue;
                 }
-                List<Vec2> arc = circularDogbone(prev, cur, next, r, ring.pts, ring.hole);
+                List<Vec2> arc = dogboneArc(prev, cur, next, r, ring.pts, ring.hole);
                 if (arc.size() < 3) {
                     out.add(cur);
                     continue;
@@ -60,10 +76,10 @@ public class DogBoneService {
                 out.addAll(arc);
                 added++;
             }
-            ring.contour.setPoints(dedupe(out, 1e-5));
+            ring.contour.setPoints(dedupe(out, 1e-6));
             ring.contour.setClosed(true);
         }
-        log.info("Applied circular dog-bones: {} corners, radius≈{}mm scale={}", added, rTool, scale);
+        log.info("Dog-bones applied: {} corners, r≈{}mm (original edges preserved)", added, rTool);
         return new Result(added, rTool);
     }
 
@@ -71,7 +87,6 @@ public class DogBoneService {
         int n = 0;
         for (Ring ring : classify(model)) {
             List<Vec2> pts = ring.pts;
-            if (pts.size() < 3) continue;
             for (int i = 0; i < pts.size(); i++) {
                 Vec2 prev = pts.get((i - 1 + pts.size()) % pts.size());
                 Vec2 cur = pts.get(i);
@@ -84,71 +99,76 @@ public class DogBoneService {
     }
 
     /**
-     * Circular arc dog-bone at corner {@code b}, tangent to edges BA and BC, bulging into waste.
+     * Classic dog-bone replacing corner B only.
+     * Returns {@code [p1, ...arc samples..., p2]} where p1/p2 lie on the original edges.
+     * Does not include B. Radius equals setback (≈ tool radius).
      */
-    List<Vec2> circularDogbone(Vec2 a, Vec2 b, Vec2 c, double r, List<Vec2> poly, boolean hole) {
-        Vec2 u = unit(a.x() - b.x(), a.y() - b.y());
-        Vec2 v = unit(c.x() - b.x(), c.y() - b.y());
+    List<Vec2> dogboneArc(Vec2 a, Vec2 b, Vec2 c, double r, List<Vec2> poly, boolean hole) {
+        Vec2 u = unit(a.x() - b.x(), a.y() - b.y()); // along edge toward prev
+        Vec2 v = unit(c.x() - b.x(), c.y() - b.y()); // along edge toward next
         if (u == null || v == null) return List.of();
 
-        double dot = clamp(u.x() * v.x() + u.y() * v.y(), -1, 1);
-        double phi = Math.acos(dot);
-        if (phi < 0.1 || phi > Math.PI - 0.1) return List.of();
+        double cosPhi = clamp(u.x() * v.x() + u.y() * v.y(), -1, 1);
+        double phi = Math.acos(cosPhi);
+        // φ is the free-space angle between the two edge rays; internal corners are acute–obtuse
+        if (phi < Math.toRadians(25) || phi > Math.toRadians(160)) return List.of();
 
-        Vec2 bis = unit(u.x() + v.x(), u.y() + v.y());
-        if (bis == null) {
-            bis = unit(-u.y(), u.x());
-            if (bis == null) return List.of();
+        // Endpoints stay exactly on BA and BC — this is what keeps original straight lines intact
+        double setback = Math.min(r, Math.min(a.dist(b), c.dist(b)) * 0.4);
+        if (setback < 0.25) return List.of();
+
+        Vec2 p1 = new Vec2(b.x() + u.x() * setback, b.y() + u.y() * setback);
+        Vec2 p2 = new Vec2(b.x() + v.x() * setback, b.y() + v.y() * setback);
+
+        // Circle centered at the corner, radius = setback (classic cartoon dog-bone)
+        double a1 = Math.atan2(p1.y() - b.y(), p1.x() - b.x());
+        double a2 = Math.atan2(p2.y() - b.y(), p2.x() - b.x());
+
+        double ccw = normAngle(a2 - a1);       // (0, 2π]
+        if (ccw < 1e-9) ccw = Math.PI * 2;
+        double cw = ccw - Math.PI * 2;         // [-2π, 0)
+
+        Vec2 midCcw = arcPoint(b, setback, a1 + ccw / 2.0);
+        Vec2 midCw = arcPoint(b, setback, a1 + cw / 2.0);
+        boolean ccwInMat = inMaterial(midCcw, poly, hole);
+        boolean cwInMat = inMaterial(midCw, poly, hole);
+
+        double sweep;
+        if (ccwInMat && !cwInMat) {
+            sweep = ccw;
+        } else if (cwInMat && !ccwInMat) {
+            sweep = cw;
+        } else if (ccwInMat && cwInMat) {
+            // Prefer the major arc (classic knuckle) when both mids test as material
+            sweep = Math.abs(ccw) >= Math.abs(cw) ? ccw : cw;
+        } else {
+            return List.of(); // neither side is material — not a usable corner
         }
 
-        // Dog-bones remove material at internal corners of the PART so a square
-        // mating feature fits — the arc must bulge INTO the solid, not into free space.
-        // Outer: material = inside poly → centre must be inside.
-        // Hole: material = outside hole ring → centre must be outside the hole.
-        double half = phi / 2.0;
-        double sinHalf = Math.sin(half);
-        if (sinHalf < 0.2) sinHalf = 0.2;
-        double dist = r / sinHalf;
-
-        Vec2 intoMaterial = bis;
-        Vec2 center = new Vec2(b.x() + intoMaterial.x() * dist, b.y() + intoMaterial.y() * dist);
-        boolean centerInMaterial = hole ? !pointInPoly(center, poly) : pointInPoly(center, poly);
-        if (!centerInMaterial) {
-            intoMaterial = new Vec2(-bis.x(), -bis.y());
-            center = new Vec2(b.x() + intoMaterial.x() * dist, b.y() + intoMaterial.y() * dist);
+        // Defensive: mid of chosen sweep must be solid
+        if (!inMaterial(arcPoint(b, setback, a1 + sweep / 2.0), poly, hole)) {
+            return List.of();
         }
 
-        // Tangent points on the two edge lines, clamped near the corner
-        Vec2 t1 = projectPointToLine(center, b, a);
-        Vec2 t2 = projectPointToLine(center, b, c);
-        t1 = clampToRay(b, u, t1, Math.min(r * 0.2, a.dist(b) * 0.1), a.dist(b) * 0.9);
-        t2 = clampToRay(b, v, t2, Math.min(r * 0.2, c.dist(b) * 0.1), c.dist(b) * 0.9);
-        t1 = pointOnCircle(center, t1, r);
-        t2 = pointOnCircle(center, t2, r);
-
-        double a1 = Math.atan2(t1.y() - center.y(), t1.x() - center.x());
-        double a2 = Math.atan2(t2.y() - center.y(), t2.x() - center.x());
-        // Prefer the arc that bulges deeper into the solid (away from free space)
-        double through = Math.atan2(center.y() - b.y(), center.x() - b.x());
-        double sweep = chooseSweep(a1, a2, through);
-
-        int segs = Math.max(10, Math.min(24, (int) Math.ceil(Math.abs(sweep) / (Math.PI / 14))));
+        int segs = Math.max(12, Math.min(28, (int) Math.ceil(Math.abs(sweep) / (Math.PI / 14))));
         List<Vec2> arc = new ArrayList<>(segs + 1);
-        for (int i = 0; i <= segs; i++) {
+        arc.add(p1); // exact on original edge BA
+        for (int i = 1; i < segs; i++) {
             double t = (double) i / segs;
             double ang = a1 + sweep * t;
-            arc.add(new Vec2(center.x() + r * Math.cos(ang), center.y() + r * Math.sin(ang)));
+            arc.add(arcPoint(b, setback, ang));
         }
+        arc.add(p2); // exact on original edge BC
         return arc;
     }
 
-    /** Signed sweep a1→a2 that passes near {@code through} (waste bulge). */
-    static double chooseSweep(double a1, double a2, double through) {
-        double ccw = normAngle(a2 - a1);
-        double cw = ccw - Math.PI * 2;
-        double midCcw = normAngle(a1 + ccw / 2);
-        double midCw = normAngle(a1 + cw / 2);
-        return angleDiff(midCcw, through) <= angleDiff(midCw, through) ? ccw : cw;
+    private static boolean inMaterial(Vec2 p, List<Vec2> poly, boolean hole) {
+        boolean inside = pointInPoly(p, poly);
+        return hole ? !inside : inside;
+    }
+
+    private static Vec2 arcPoint(Vec2 center, double radius, double ang) {
+        return new Vec2(center.x() + radius * Math.cos(ang), center.y() + radius * Math.sin(ang));
     }
 
     static double normAngle(double a) {
@@ -157,20 +177,16 @@ public class DogBoneService {
         return t;
     }
 
-    static double angleDiff(double a, double b) {
-        double d = Math.abs(normAngle(a) - normAngle(b));
-        return Math.min(d, Math.PI * 2 - d);
-    }
-
     boolean needsDogbone(Vec2 a, Vec2 b, Vec2 c, boolean hole, boolean ccw) {
         double cross = (b.x() - a.x()) * (c.y() - b.y()) - (b.y() - a.y()) * (c.x() - b.x());
-        boolean leftTurn = cross > 1e-4;
-        boolean rightTurn = cross < -1e-4;
-        if (!leftTurn && !rightTurn) return false;
+        boolean left = cross > 1e-4;
+        boolean right = cross < -1e-4;
+        if (!left && !right) return false;
         if (!isSharp(a, b, c)) return false;
-        // Outer CCW: internal = right turn; Hole CCW: dogbone on left (convex of hole ring)
-        if (!hole) return ccw ? rightTurn : leftTurn;
-        return ccw ? leftTurn : rightTurn;
+        // Outer CCW solid: material left of edges → concave = right turn
+        // Hole CCW void: material outside → dog-bone where hole turns left into plate
+        if (!hole) return ccw ? right : left;
+        return ccw ? left : right;
     }
 
     private boolean isSharp(Vec2 a, Vec2 b, Vec2 c) {
@@ -179,7 +195,7 @@ public class DogBoneService {
         double al = Math.hypot(ax, ay), cl = Math.hypot(cx, cy);
         if (al < 1e-9 || cl < 1e-9) return false;
         double ang = Math.acos(clamp((ax * cx + ay * cy) / (al * cl), -1, 1));
-        return ang < Math.PI - 0.12;
+        return ang < Math.PI - 0.15;
     }
 
     private record Ring(Contour contour, List<Vec2> pts, boolean hole, boolean ccw, double area) {}
@@ -192,7 +208,8 @@ public class DogBoneService {
             if (pts.size() >= 2 && pts.get(0).dist(pts.get(pts.size() - 1)) < 1e-4) {
                 pts = new ArrayList<>(pts.subList(0, pts.size() - 1));
             }
-            boolean closed = c.isClosed() || (pts.size() >= 3 && pts.get(0).dist(pts.get(pts.size() - 1)) < 0.5);
+            boolean closed = c.isClosed()
+                    || (pts.size() >= 3 && pts.get(0).dist(pts.get(pts.size() - 1)) < 0.5);
             if (!closed || pts.size() < 3) continue;
             double sa = signedArea(pts);
             double area = Math.abs(sa);
@@ -222,27 +239,6 @@ public class DogBoneService {
         double L = Math.hypot(x, y);
         if (L < 1e-12) return null;
         return new Vec2(x / L, y / L);
-    }
-
-    private static Vec2 projectPointToLine(Vec2 p, Vec2 a, Vec2 b) {
-        double vx = b.x() - a.x(), vy = b.y() - a.y();
-        double L2 = vx * vx + vy * vy;
-        if (L2 < 1e-18) return a;
-        double t = ((p.x() - a.x()) * vx + (p.y() - a.y()) * vy) / L2;
-        return new Vec2(a.x() + t * vx, a.y() + t * vy);
-    }
-
-    private static Vec2 clampToRay(Vec2 origin, Vec2 dirUnit, Vec2 p, double minT, double maxT) {
-        double t = (p.x() - origin.x()) * dirUnit.x() + (p.y() - origin.y()) * dirUnit.y();
-        t = Math.max(minT, Math.min(maxT, t));
-        return new Vec2(origin.x() + dirUnit.x() * t, origin.y() + dirUnit.y() * t);
-    }
-
-    private static Vec2 pointOnCircle(Vec2 center, Vec2 approx, double r) {
-        double dx = approx.x() - center.x(), dy = approx.y() - center.y();
-        double L = Math.hypot(dx, dy);
-        if (L < 1e-12) return new Vec2(center.x() + r, center.y());
-        return new Vec2(center.x() + dx / L * r, center.y() + dy / L * r);
     }
 
     private static List<Vec2> dedupe(List<Vec2> pts, double eps) {
