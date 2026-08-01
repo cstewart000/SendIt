@@ -335,8 +335,9 @@ export function DesignWizardPage() {
               <div className="panel" style={{ padding: '0.85rem', border: '1px solid var(--line)', marginTop: 4 }}>
                 <h3 style={{ marginTop: 0 }}>Dog-bones</h3>
                 <p className="muted" style={{ margin: '0 0 0.6rem', fontSize: '0.88rem' }}>
-                  Circular clearance at sharp internal corners. The circle centre is offset into the material
-                  so the original corner sits on the rim (Fusion-style); straight edges stay unchanged.
+                  Circular clearance at sharp internal corners. The circle centre sits in free space so the
+                  original corner sits on the rim; the arc overcuts into the solid (Fusion-style). Straight
+                  edges beyond the notch stay unchanged.
                 </p>
                 {dogPreview && (
                   <p className="muted" style={{ margin: '0 0 0.6rem' }}>
