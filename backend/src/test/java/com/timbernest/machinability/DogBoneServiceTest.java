@@ -31,9 +31,13 @@ class DogBoneServiceTest {
         // Circular arc inserts many points (not just +1 spike)
         assertTrue(after >= before + 8, "expected arc tessellation, points " + before + "→" + after);
 
-        // Arc should extend into the missing quadrant near (40,40) — points with x>40 and y>40
-        boolean intoWaste = c.getPoints().stream().anyMatch(p -> p.x() > 41 && p.y() > 41);
-        assertTrue(intoWaste, "dog-bone arc should bulge into L waste (x>40,y>40)");
+        // Arc must cut INTO the solid L (not into free space x>40,y>40)
+        // Near (40,40), material is the region x<=40 or y<=40 inside the L
+        boolean intoMaterial = c.getPoints().stream()
+                .anyMatch(p -> p.x() < 39.5 && p.y() < 39.5);
+        assertTrue(intoMaterial, "dog-bone arc should bulge into part material (x<40,y<40), not free space");
+        boolean intoSpace = c.getPoints().stream().anyMatch(p -> p.x() > 42 && p.y() > 42);
+        assertFalse(intoSpace, "dog-bone must not extend into free space outside the L");
     }
 
     @Test

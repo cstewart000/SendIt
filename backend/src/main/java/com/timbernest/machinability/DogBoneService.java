@@ -12,12 +12,14 @@ import java.util.List;
 
 /**
  * Inserts circular dog-bone arcs at internal corners so a round endmill can fully
- * clear square internal corners. Each dog-bone is a tessellated circular arc
- * (not a single spike point).
+ * clear square internal corners. Each dog-bone is a tessellated circular arc.
+ *
+ * <p>Arcs cut INTO the part material (not out into free space), so a square male
+ * feature can seat fully in a female internal corner.
  *
  * <ul>
- *   <li>Outer contours: concave corners → arc into sheet waste</li>
- *   <li>Holes: hole corners → arc into the void</li>
+ *   <li>Outer contours: concave corners → arc into the solid</li>
+ *   <li>Holes: corners → arc into the surrounding solid (not the void)</li>
  * </ul>
  */
 @Service
@@ -99,19 +101,21 @@ public class DogBoneService {
             if (bis == null) return List.of();
         }
 
-        // Point bis into waste (not material)
+        // Dog-bones remove material at internal corners of the PART so a square
+        // mating feature fits — the arc must bulge INTO the solid, not into free space.
+        // Outer: material = inside poly → centre must be inside.
+        // Hole: material = outside hole ring → centre must be outside the hole.
         double half = phi / 2.0;
         double sinHalf = Math.sin(half);
         if (sinHalf < 0.2) sinHalf = 0.2;
         double dist = r / sinHalf;
 
-        Vec2 waste = bis;
-        Vec2 center = new Vec2(b.x() + waste.x() * dist, b.y() + waste.y() * dist);
-        // Outer: waste is outside poly; hole: waste is inside hole poly
-        boolean centerInWaste = hole ? pointInPoly(center, poly) : !pointInPoly(center, poly);
-        if (!centerInWaste) {
-            waste = new Vec2(-bis.x(), -bis.y());
-            center = new Vec2(b.x() + waste.x() * dist, b.y() + waste.y() * dist);
+        Vec2 intoMaterial = bis;
+        Vec2 center = new Vec2(b.x() + intoMaterial.x() * dist, b.y() + intoMaterial.y() * dist);
+        boolean centerInMaterial = hole ? !pointInPoly(center, poly) : pointInPoly(center, poly);
+        if (!centerInMaterial) {
+            intoMaterial = new Vec2(-bis.x(), -bis.y());
+            center = new Vec2(b.x() + intoMaterial.x() * dist, b.y() + intoMaterial.y() * dist);
         }
 
         // Tangent points on the two edge lines, clamped near the corner
@@ -124,7 +128,7 @@ public class DogBoneService {
 
         double a1 = Math.atan2(t1.y() - center.y(), t1.x() - center.x());
         double a2 = Math.atan2(t2.y() - center.y(), t2.x() - center.x());
-        // Prefer the arc that bulges deeper into waste (away from the corner)
+        // Prefer the arc that bulges deeper into the solid (away from free space)
         double through = Math.atan2(center.y() - b.y(), center.x() - b.x());
         double sweep = chooseSweep(a1, a2, through);
 
