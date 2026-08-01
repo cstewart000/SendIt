@@ -137,7 +137,7 @@ public class DesignService {
         }
     }
 
-    DesignDtos.VersionDto toVersion(DesignVersion v) {
+    public DesignDtos.VersionDto toVersion(DesignVersion v) {
         GeometryModel g = v.getGeometryJson() == null ? null : json.toModel(v.getGeometryJson());
         int count = (int) designParts.countByDesignVersionId(v.getId());
         return new DesignDtos.VersionDto(v.getId(), v.getVersionNumber(), v.getOriginalFilename(),

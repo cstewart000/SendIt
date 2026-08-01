@@ -12,7 +12,11 @@ type Version = {
   issues?: { id: string; category: string; severity: string; message: string; highlight?: { x: number; y: number }[] }[]
 }
 type Detail = { id: number; name: string; versions: Version[] }
-type Catalog = { machines: { id: number }[]; materials: { id: number }[]; tools: { id: number }[] }
+type Catalog = {
+  machines: { id: number; name?: string }[]
+  materials: { id: number; name?: string }[]
+  tools: { id: number; name: string; diameterMm: number; type?: string }[]
+}
 
 const FIXES = [
   ['CLOSE_OPEN_CONTOURS', 'Close open contours'],
@@ -20,6 +24,12 @@ const FIXES = [
   ['REMOVE_DUPLICATES', 'Remove duplicates'],
   ['PURGE_NON_GEOMETRY', 'Purge text/dims'],
   ['COLLAPSE_TINY', 'Collapse tiny segments'],
+] as const
+
+const DOG_SCALES = [
+  { value: 0.6, label: 'Light (0.6× tool radius)' },
+  { value: 1.0, label: 'Standard (1× tool radius)' },
+  { value: 1.2, label: 'Heavy (1.2× tool radius)' },
 ] as const
 
 export function DesignWizardPage() {
@@ -32,6 +42,11 @@ export function DesignWizardPage() {
   const [parts, setParts] = useState<DesignPart[]>([])
   const [selection, setSelection] = useState<PartSelection>({})
   const [error, setError] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [dogToolId, setDogToolId] = useState<number | ''>('')
+  const [dogScale, setDogScale] = useState(1.0)
+  const [dogPreview, setDogPreview] = useState<{ candidates: number; message: string } | null>(null)
+  const [dogMsg, setDogMsg] = useState('')
   const version = detail?.versions[0]
 
   async function reload() {
@@ -54,15 +69,30 @@ export function DesignWizardPage() {
     }
   }
 
+  async function refreshDogPreview(versionId: number, toolId?: number) {
+    try {
+      const q = toolId ? `?toolId=${toolId}` : ''
+      const p = await api<{ candidates: number; message: string }>(
+        `/designs/${id}/versions/${versionId}/dogbones/preview${q}`,
+      )
+      setDogPreview(p)
+    } catch {
+      setDogPreview(null)
+    }
+  }
+
   useEffect(() => {
     Promise.all([reload(), api<Catalog>('/catalog')])
       .then(async ([d, c]) => {
         setCatalog(c)
+        if (c.tools?.length) {
+          const preferred = c.tools.find(t => (t.type || '').toUpperCase() === 'ENDMILL') || c.tools[0]
+          setDogToolId(preferred.id)
+        }
         if (d.versions[0]) {
           const v = d.versions[0]
           const fn = (v.originalFilename || '').toLowerCase()
           const reparseKey = `dwg-linefix-v1-${v.id}`
-          // Force re-analyse once after contour-join fix so multi-part kits re-extract all outers
           const joinFixKey = `contour-join-v2-${v.id}`
           const needsAnalyse = !v.analysed
             || (fn.endsWith('.dwg') && !localStorage.getItem(reparseKey))
@@ -75,28 +105,85 @@ export function DesignWizardPage() {
             await reload()
           }
           await loadParts(v.id)
+          await refreshDogPreview(v.id, c.tools?.[0]?.id)
         }
       })
       .catch(e => setError(e.message))
   }, [id])
 
+  useEffect(() => {
+    if (version && dogToolId !== '') {
+      void refreshDogPreview(version.id, Number(dogToolId))
+    }
+  }, [dogToolId, version?.id])
+
   async function repair(action: string) {
     if (!version) return
-    await api(`/designs/${id}/versions/${version.id}/repairs/${action}`, {
-      method: 'POST', body: JSON.stringify({ confirm: true }),
-    })
-    const d = await reload()
-    if (d.versions[0]) await loadParts(d.versions[0].id)
+    setBusy(true)
+    setError('')
+    try {
+      await api(`/designs/${id}/versions/${version.id}/repairs/${action}`, {
+        method: 'POST', body: JSON.stringify({ confirm: true }),
+      })
+      const d = await reload()
+      if (d.versions[0]) {
+        await loadParts(d.versions[0].id)
+        await refreshDogPreview(d.versions[0].id, dogToolId === '' ? undefined : Number(dogToolId))
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Repair failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function applyDogbones() {
+    if (!version || dogToolId === '') return
+    setBusy(true)
+    setError('')
+    setDogMsg('')
+    try {
+      const res = await api<{
+        dogBonesAdded: number
+        radiusMm: number
+        message: string
+      }>(`/designs/${id}/versions/${version.id}/dogbones`, {
+        method: 'POST',
+        body: JSON.stringify({
+          toolId: Number(dogToolId),
+          scale: dogScale,
+          confirm: true,
+        }),
+      })
+      setDogMsg(res.message || `Added ${res.dogBonesAdded} dog-bone(s)`)
+      const d = await reload()
+      if (d.versions[0]) {
+        await loadParts(d.versions[0].id)
+        await refreshDogPreview(d.versions[0].id, Number(dogToolId))
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Dog-bone apply failed')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function runMachinability() {
     if (!version || !catalog) return
-    const issues = await api<Version['issues']>(`/designs/${id}/versions/${version.id}/machinability`, {
-      method: 'POST',
-      body: JSON.stringify({ toolId: catalog.tools[0].id, materialId: catalog.materials[0].id }),
-    })
-    setMachIssues(issues || [])
-    setStep(2)
+    setBusy(true)
+    try {
+      const toolId = dogToolId !== '' ? Number(dogToolId) : catalog.tools[0].id
+      const issues = await api<Version['issues']>(`/designs/${id}/versions/${version.id}/machinability`, {
+        method: 'POST',
+        body: JSON.stringify({ toolId, materialId: catalog.materials[0].id }),
+      })
+      setMachIssues(issues || [])
+      setStep(2)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Machinability check failed')
+    } finally {
+      setBusy(false)
+    }
   }
 
   async function continueToJob() {
@@ -104,6 +191,7 @@ export function DesignWizardPage() {
       partId: Number(partId), quantity,
     }))
     if (!version || !catalog || !quantities.length) return
+    const toolId = dogToolId !== '' ? Number(dogToolId) : catalog.tools[0].id
     await api(`/designs/${id}/versions/${version.id}/acknowledge-warnings`, {
       method: 'POST', body: JSON.stringify({ acknowledge: true }),
     })
@@ -113,7 +201,7 @@ export function DesignWizardPage() {
         title: detail?.name || undefined,
         machineId: catalog.machines[0].id,
         materialId: catalog.materials[0].id,
-        toolId: catalog.tools[0].id,
+        toolId,
       }),
     })
     await api(`/jobs/${job.id}/parts`, {
@@ -125,18 +213,15 @@ export function DesignWizardPage() {
 
   const selectedIds = Object.keys(selection).map(Number)
   const totalPieces = Object.values(selection).reduce((a, b) => a + b, 0)
-  // 2D: dim to selected when user has a selection; else full file
   const highlight = useMemo(
     () => parts.filter(p => selectedIds.includes(p.id)).flatMap(p => p.geometry?.contours || []),
     [parts, selection],
   )
   const contours = version?.geometry?.contours || []
-  // 3D: always show every design part (not a single outer)
-  const partsFor3d = useMemo(() => {
-    if (parts.length) return parts
-    return []
-  }, [parts])
+  const partsFor3d = useMemo(() => (parts.length ? parts : []), [parts])
   const issues = step >= 2 ? machIssues : version?.issues || []
+  const selectedTool = catalog?.tools.find(t => t.id === dogToolId)
+  const dogRadius = selectedTool ? (selectedTool.diameterMm / 2) * dogScale : 0
 
   return (
     <Shell>
@@ -169,18 +254,95 @@ export function DesignWizardPage() {
                 <div key={i.id} className={`issue ${i.severity}`}>{i.category}: {i.message}</div>
               ))}
               {FIXES.map(([code, label]) => (
-                <button key={code} className="ghost" onClick={() => repair(code)}>{label}</button>
+                <button key={code} className="ghost" disabled={busy} onClick={() => repair(code)}>{label}</button>
               ))}
-              <button onClick={() => { setStep(2); runMachinability() }}>Continue to parts</button>
+
+              <div className="panel" style={{ padding: '0.85rem', border: '1px solid var(--line)', marginTop: 4 }}>
+                <h3 style={{ marginTop: 0 }}>Dog-bones</h3>
+                <p className="muted" style={{ margin: '0 0 0.6rem', fontSize: '0.88rem' }}>
+                  Add clearance notches at sharp internal corners so a round endmill can fully machine the corner.
+                </p>
+                {dogPreview && (
+                  <p className="muted" style={{ margin: '0 0 0.6rem' }}>
+                    {dogPreview.message}
+                  </p>
+                )}
+                <label>Tool (sets dog-bone radius)
+                  <select
+                    value={dogToolId === '' ? '' : String(dogToolId)}
+                    onChange={e => setDogToolId(e.target.value ? Number(e.target.value) : '')}
+                    disabled={busy}
+                  >
+                    <option value="">Select tool…</option>
+                    {(catalog?.tools || []).map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} — Ø{t.diameterMm} mm
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>Size
+                  <select
+                    value={String(dogScale)}
+                    onChange={e => setDogScale(Number(e.target.value))}
+                    disabled={busy}
+                  >
+                    {DOG_SCALES.map(s => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
+                  </select>
+                </label>
+                {selectedTool && (
+                  <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
+                    Notch radius ≈ <strong>{dogRadius.toFixed(2)} mm</strong>
+                    {' '}(½ × Ø{selectedTool.diameterMm} × {dogScale})
+                  </p>
+                )}
+                <div className="row" style={{ marginTop: 8 }}>
+                  <button
+                    type="button"
+                    disabled={busy || dogToolId === '' || (dogPreview?.candidates ?? 0) === 0}
+                    onClick={applyDogbones}
+                  >
+                    Apply dog-bones
+                    {dogPreview && dogPreview.candidates > 0 ? ` (${dogPreview.candidates})` : ''}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={busy || !version}
+                    onClick={() => version && refreshDogPreview(version.id, dogToolId === '' ? undefined : Number(dogToolId))}
+                  >
+                    Refresh count
+                  </button>
+                </div>
+                {dogMsg && <p style={{ color: 'var(--ok)', margin: '0.5rem 0 0' }}>{dogMsg}</p>}
+              </div>
+
+              <button disabled={busy} onClick={() => { void runMachinability() }}>
+                Continue to parts
+              </button>
             </>
           )}
           {step === 2 && version && (
             <>
               <h3>Select parts & quantities</h3>
               <p className="muted">Set qty per part, or use “Set all” for multiples of every part.</p>
+              {(machIssues || []).length > 0 && (
+                <div>
+                  <h4 style={{ marginBottom: 4 }}>Machinability</h4>
+                  {machIssues!.map(i => (
+                    <div key={i.id} className={`issue ${i.severity}`}>{i.category}: {i.message}</div>
+                  ))}
+                  <button type="button" className="ghost" disabled={busy}
+                    onClick={() => { setStep(1) }}>
+                    Back to repair / dog-bones
+                  </button>
+                </div>
+              )}
               <PartPicker designId={id!} versionId={version.id} selection={selection}
                 onChange={setSelection} onPartsLoaded={setParts} />
-              <button onClick={continueToJob} disabled={!selectedIds.length}>
+              <button onClick={continueToJob} disabled={!selectedIds.length || busy}>
                 Create job ({selectedIds.length} types, {totalPieces} pieces)
               </button>
             </>

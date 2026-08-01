@@ -23,6 +23,7 @@ public class SeedData {
                            MaterialRepository materials, ProcessRepository processes,
                            PricingRuleRepository pricing, PasswordEncoder encoder) {
         return args -> {
+            // SchemaPatcher (@Order 1) runs first and adds missing columns.
             if (users.count() == 0) {
                 AppUser admin = new AppUser();
                 admin.setEmail("admin@sendit.local");
