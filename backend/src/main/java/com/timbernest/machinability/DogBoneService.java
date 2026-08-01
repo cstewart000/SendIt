@@ -11,30 +11,26 @@ import java.util.Comparator;
 import java.util.List;
 
 /**
- * CNC dog-bone fillets for internal corners.
+ * CNC dog-bone fillets for internal corners (Vectric / Fusion-style).
  *
  * <h2>Why dog-bones</h2>
- * A round endmill cannot cut a sharp internal corner (minimum radius = tool radius).
- * Without relief, a square male feature will not seat fully. A dog-bone overcuts
- * into the <b>part material</b> at that corner (Vectric / Fusion-style) so the mate fits.
+ * A round endmill cannot cut a sharp internal corner (min radius = tool radius).
+ * A dog-bone overcuts into the <b>part material</b> so a square male feature can seat fully.
  *
- * <h2>Geometry (classic cartoon dog-bone)</h2>
- * At corner B with unit directions {@code u}, {@code v} along the two original edges
- * toward the neighboring vertices:
+ * <h2>Geometry (Fusion dog-bone hole)</h2>
+ * At corner vertex B with unit edge directions u, v:
  * <pre>
- *   setback  = tool radius r  (clamped to edge length)
- *   p1       = B + u · setback     // still on original edge BA
- *   p2       = B + v · setback     // still on original edge BC
- *   center   = B
- *   radius   = setback
- *   arc      = major arc p1 → p2 that travels through SOLID material
+ *   into   = unit bisector into solid material
+ *   center = B + into · r          // offset into material by tool radius
+ *   radius = r                     // tool radius
+ *   // ⇒ original vertex B lies on the circle (outer edge "tangent" to the vertex)
  * </pre>
- * For a 90° free-space corner that is a 270° circular lobe of radius r into the solid.
+ * The contour keeps both original straight edges all the way to B, and inserts a full
+ * circular lobe (the dog-bone hole) whose rim passes through B and whose body sits
+ * in the solid. Non-corner vertices are never moved.
  *
- * <h2>Critical rule</h2>
- * Original straight edges are never moved or bent. Only the single corner vertex is
- * replaced by the arc; endpoints lie exactly on the original edge segments, so every
- * other point on those edges stays collinear with the design intent.
+ * <p>This matches the Fusion Dogbone add-in: centreline from corner along the bisector
+ * of length r, circle of radius r, corner coincident with the circle.
  */
 @Service
 public class DogBoneService {
@@ -59,7 +55,6 @@ public class DogBoneService {
                 double lenOut = cur.dist(next);
                 if (lenIn < MIN_EDGE || lenOut < MIN_EDGE
                         || !needsDogbone(prev, cur, next, ring.hole, ring.ccw)) {
-                    // Keep original vertex exactly — straight edges unchanged
                     out.add(cur);
                     continue;
                 }
@@ -68,18 +63,18 @@ public class DogBoneService {
                     out.add(cur);
                     continue;
                 }
-                List<Vec2> arc = dogboneArc(prev, cur, next, r, ring.pts, ring.hole);
-                if (arc.size() < 3) {
+                List<Vec2> lobe = dogboneLobe(prev, cur, next, r, ring.pts, ring.hole);
+                if (lobe.size() < 4) {
                     out.add(cur);
                     continue;
                 }
-                out.addAll(arc);
+                out.addAll(lobe);
                 added++;
             }
             ring.contour.setPoints(dedupe(out, 1e-6));
             ring.contour.setClosed(true);
         }
-        log.info("Dog-bones applied: {} corners, r≈{}mm (original edges preserved)", added, rTool);
+        log.info("Dog-bones applied: {} corners, r≈{}mm (vertex on circle rim)", added, rTool);
         return new Result(added, rTool);
     }
 
@@ -99,67 +94,96 @@ public class DogBoneService {
     }
 
     /**
-     * Classic dog-bone replacing corner B only.
-     * Returns {@code [p1, ...arc samples..., p2]} where p1/p2 lie on the original edges.
-     * Does not include B. Radius equals setback (≈ tool radius).
+     * Fusion-style dog-bone at corner B: circle of radius r whose centre is offset into
+     * material by r, so the original vertex lies on the circumference.
+     * Returns {@code [B, ...circle samples..., B]} so both original edges still meet at B.
      */
-    List<Vec2> dogboneArc(Vec2 a, Vec2 b, Vec2 c, double r, List<Vec2> poly, boolean hole) {
-        Vec2 u = unit(a.x() - b.x(), a.y() - b.y()); // along edge toward prev
-        Vec2 v = unit(c.x() - b.x(), c.y() - b.y()); // along edge toward next
+    List<Vec2> dogboneLobe(Vec2 a, Vec2 b, Vec2 c, double r, List<Vec2> poly, boolean hole) {
+        Vec2 u = unit(a.x() - b.x(), a.y() - b.y());
+        Vec2 v = unit(c.x() - b.x(), c.y() - b.y());
         if (u == null || v == null) return List.of();
 
         double cosPhi = clamp(u.x() * v.x() + u.y() * v.y(), -1, 1);
         double phi = Math.acos(cosPhi);
-        // φ is the free-space angle between the two edge rays; internal corners are acute–obtuse
         if (phi < Math.toRadians(25) || phi > Math.toRadians(160)) return List.of();
 
-        // Endpoints stay exactly on BA and BC — this is what keeps original straight lines intact
-        double setback = Math.min(r, Math.min(a.dist(b), c.dist(b)) * 0.4);
-        if (setback < 0.25) return List.of();
-
-        Vec2 p1 = new Vec2(b.x() + u.x() * setback, b.y() + u.y() * setback);
-        Vec2 p2 = new Vec2(b.x() + v.x() * setback, b.y() + v.y() * setback);
-
-        // Circle centered at the corner, radius = setback (classic cartoon dog-bone)
-        double a1 = Math.atan2(p1.y() - b.y(), p1.x() - b.x());
-        double a2 = Math.atan2(p2.y() - b.y(), p2.x() - b.x());
-
-        double ccw = normAngle(a2 - a1);       // (0, 2π]
-        if (ccw < 1e-9) ccw = Math.PI * 2;
-        double cw = ccw - Math.PI * 2;         // [-2π, 0)
-
-        Vec2 midCcw = arcPoint(b, setback, a1 + ccw / 2.0);
-        Vec2 midCw = arcPoint(b, setback, a1 + cw / 2.0);
-        boolean ccwInMat = inMaterial(midCcw, poly, hole);
-        boolean cwInMat = inMaterial(midCw, poly, hole);
-
-        double sweep;
-        if (ccwInMat && !cwInMat) {
-            sweep = ccw;
-        } else if (cwInMat && !ccwInMat) {
-            sweep = cw;
-        } else if (ccwInMat && cwInMat) {
-            // Prefer the major arc (classic knuckle) when both mids test as material
-            sweep = Math.abs(ccw) >= Math.abs(cw) ? ccw : cw;
-        } else {
-            return List.of(); // neither side is material — not a usable corner
+        if (r < 0.25 || a.dist(b) < r * 1.05 || c.dist(b) < r * 1.05) {
+            // Need enough edge to keep geometry stable around the lobe
+            r = Math.min(r, Math.min(a.dist(b), c.dist(b)) * 0.4);
+            if (r < 0.25) return List.of();
         }
 
-        // Defensive: mid of chosen sweep must be solid
-        if (!inMaterial(arcPoint(b, setback, a1 + sweep / 2.0), poly, hole)) {
-            return List.of();
-        }
+        Vec2 into = intoMaterial(u, v, b, r, poly, hole);
+        if (into == null) return List.of();
 
-        int segs = Math.max(12, Math.min(28, (int) Math.ceil(Math.abs(sweep) / (Math.PI / 14))));
-        List<Vec2> arc = new ArrayList<>(segs + 1);
-        arc.add(p1); // exact on original edge BA
+        // Centre offset into solid by r ⇒ original vertex B is on the circle rim
+        Vec2 center = new Vec2(b.x() + into.x() * r, b.y() + into.y() * r);
+
+        double a0 = Math.atan2(b.y() - center.y(), b.x() - center.x());
+        // Full circle; pick winding so the lobe body sits in material (and removes solid)
+        double sweep = pickFullSweep(center, r, a0, poly, hole);
+        if (sweep == 0) return List.of();
+
+        int segs = Math.max(20, Math.min(36, (int) Math.ceil(Math.abs(sweep) / (Math.PI / 16))));
+        List<Vec2> lobe = new ArrayList<>(segs + 2);
+        // Start at original vertex — edges BA / BC remain exact straight lines into B
+        lobe.add(b);
         for (int i = 1; i < segs; i++) {
-            double t = (double) i / segs;
-            double ang = a1 + sweep * t;
-            arc.add(arcPoint(b, setback, ang));
+            double ang = a0 + sweep * ((double) i / segs);
+            lobe.add(arcPoint(center, r, ang));
         }
-        arc.add(p2); // exact on original edge BC
-        return arc;
+        // End at original vertex again so the outgoing edge BC is unchanged
+        lobe.add(b);
+        return lobe;
+    }
+
+    /**
+     * Unit direction from corner into solid material along the angle bisector.
+     */
+    private Vec2 intoMaterial(Vec2 u, Vec2 v, Vec2 b, double r, List<Vec2> poly, boolean hole) {
+        Vec2 bis = unit(u.x() + v.x(), u.y() + v.y());
+        if (bis == null) bis = unit(-u.y(), u.x());
+        if (bis == null) return null;
+
+        // Probe a point slightly along +bis and -bis; pick the one in material
+        Vec2 pPos = new Vec2(b.x() + bis.x() * r * 0.5, b.y() + bis.y() * r * 0.5);
+        Vec2 pNeg = new Vec2(b.x() - bis.x() * r * 0.5, b.y() - bis.y() * r * 0.5);
+        boolean posMat = inMaterial(pPos, poly, hole);
+        boolean negMat = inMaterial(pNeg, poly, hole);
+        if (posMat && !negMat) return bis;
+        if (negMat && !posMat) return new Vec2(-bis.x(), -bis.y());
+        if (posMat) return bis;
+        if (negMat) return new Vec2(-bis.x(), -bis.y());
+        return null;
+    }
+
+    /**
+     * Full ±2π sweep starting at a0. Prefer the winding whose interior (disk) is material
+     * so the lobe overcuts solid, and a sample opposite B is in material.
+     */
+    private double pickFullSweep(Vec2 center, double r, double a0, List<Vec2> poly, boolean hole) {
+        // Point opposite the vertex on the circle (deepest into the offset direction)
+        Vec2 opposite = arcPoint(center, r, a0 + Math.PI);
+        if (!inMaterial(opposite, poly, hole)) {
+            // Should still be material for a correct into-offset; try both winds via sample
+        }
+        // For outer solid, a CW loop (negative) attached on a CCW contour treats the disk
+        // as exterior (material removed). Verify with a mid-side sample.
+        double cw = -Math.PI * 2;
+        double ccw = Math.PI * 2;
+        Vec2 midCw = arcPoint(center, r, a0 + cw / 2.0);   // = opposite
+        Vec2 midCcw = arcPoint(center, r, a0 + ccw / 2.0); // = opposite too for full circle
+        // Both full sweeps share the same points; orientation matters for winding only.
+        // Use a quarter-turn sample to decide orientation relative to material.
+        Vec2 qCw = arcPoint(center, r, a0 + cw * 0.25);
+        Vec2 qCcw = arcPoint(center, r, a0 + ccw * 0.25);
+        boolean qCwMat = inMaterial(qCw, poly, hole);
+        boolean qCcwMat = inMaterial(qCcw, poly, hole);
+        if (qCwMat && !qCcwMat) return cw;
+        if (qCcwMat && !qCwMat) return ccw;
+        // Prefer the wind that keeps opposite in material (both should)
+        if (inMaterial(opposite, poly, hole)) return cw;
+        return 0;
     }
 
     private static boolean inMaterial(Vec2 p, List<Vec2> poly, boolean hole) {
@@ -171,20 +195,12 @@ public class DogBoneService {
         return new Vec2(center.x() + radius * Math.cos(ang), center.y() + radius * Math.sin(ang));
     }
 
-    static double normAngle(double a) {
-        double t = a % (Math.PI * 2);
-        if (t < 0) t += Math.PI * 2;
-        return t;
-    }
-
     boolean needsDogbone(Vec2 a, Vec2 b, Vec2 c, boolean hole, boolean ccw) {
         double cross = (b.x() - a.x()) * (c.y() - b.y()) - (b.y() - a.y()) * (c.x() - b.x());
         boolean left = cross > 1e-4;
         boolean right = cross < -1e-4;
         if (!left && !right) return false;
         if (!isSharp(a, b, c)) return false;
-        // Outer CCW solid: material left of edges → concave = right turn
-        // Hole CCW void: material outside → dog-bone where hole turns left into plate
         if (!hole) return ccw ? right : left;
         return ccw ? left : right;
     }

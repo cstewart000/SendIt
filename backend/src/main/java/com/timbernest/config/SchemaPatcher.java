@@ -39,8 +39,10 @@ public class SchemaPatcher implements ApplicationRunner {
             exec(s, "ALTER TABLE machine ADD COLUMN IF NOT EXISTS tab_count integer DEFAULT 4");
             // Job CAM options JSON
             exec(s, "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS cam_json text DEFAULT '{}'");
+            // Dog-bone undo snapshot
+            exec(s, "ALTER TABLE design_version ADD COLUMN IF NOT EXISTS pre_dogbone_geometry_json text");
             // Pricing rule value was already present; no-op safe
-            log.info("SchemaPatcher applied machine/job CAM columns");
+            log.info("SchemaPatcher applied machine/job CAM + dogbone columns");
         } catch (Exception e) {
             log.error("SchemaPatcher failed: {}", e.toString());
             throw new IllegalStateException("Schema patch failed: " + e.getMessage(), e);

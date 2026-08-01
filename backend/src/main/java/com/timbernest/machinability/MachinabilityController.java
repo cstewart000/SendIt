@@ -72,4 +72,13 @@ public class MachinabilityController {
         double scale = body.get("scale") == null ? 1.0 : ((Number) body.get("scale")).doubleValue();
         return designService.applyDogbones(user, id, vid, toolId, scale, confirm);
     }
+
+    /**
+     * Undo the last dog-bone apply by restoring the pre-apply geometry snapshot.
+     */
+    @PostMapping("/dogbones/undo")
+    public Map<String, Object> undoDogbones(@AuthenticationPrincipal AppUser user,
+                                            @PathVariable Long id, @PathVariable Long vid) {
+        return designService.undoDogbones(user, id, vid);
+    }
 }

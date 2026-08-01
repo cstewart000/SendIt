@@ -116,6 +116,7 @@ public class DesignService {
 
     /**
      * Apply dog-bones to sharp internal corners, save geometryJson + design parts, re-analyse.
+     * Snapshots current geometry so {@link #undoDogbones} can restore it.
      */
     @Transactional
     public Map<String, Object> applyDogbones(AppUser user, Long designId, Long versionId,
@@ -126,6 +127,13 @@ public class DesignService {
         GeometryModel model = access.loadOrParse(v);
         Tool tool = tools.findById(toolId)
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "tool not found"));
+
+        // Snapshot for undo (always overwrite so undo reverses the latest apply)
+        String snapshot = v.getGeometryJson();
+        if (snapshot == null || snapshot.isBlank()) {
+            snapshot = json.toJson(model);
+        }
+        v.setPreDogboneGeometryJson(snapshot);
 
         int before = dogBones.countCandidates(model);
         int pointsBefore = model.getContours().stream().mapToInt(c -> c.getPoints().size()).sum();
@@ -154,6 +162,36 @@ public class DesignService {
         out.put("pointsBefore", pointsBefore);
         out.put("pointsAfter", pointsAfter);
         out.put("pointsStored", pointsStored);
+        out.put("canUndo", true);
+        out.put("message", reason);
+        out.put("version", version);
+        out.put("geometry", check);
+        return out;
+    }
+
+    /**
+     * Restore geometry from the snapshot taken before the last dog-bone apply.
+     */
+    @Transactional
+    public Map<String, Object> undoDogbones(AppUser user, Long designId, Long versionId) {
+        DesignVersion v = access.ownedVersion(user, designId, versionId);
+        if (!v.hasPreDogboneSnapshot()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "No dog-bone snapshot to undo — apply dog-bones first");
+        }
+        GeometryModel restored = json.toModel(v.getPreDogboneGeometryJson());
+        v.setPreDogboneGeometryJson(null);
+        String reason = "Undo dog-bones (restored pre-dogbone geometry)";
+        DesignDtos.VersionDto version = persistRepaired(v, restored, "UNDO_DOGBONES", reason);
+
+        DesignVersion reloaded = versions.findById(v.getId()).orElseThrow();
+        GeometryModel check = json.toModel(reloaded.getGeometryJson());
+        int points = check.getContours().stream().mapToInt(c -> c.getPoints().size()).sum();
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("undone", true);
+        out.put("canUndo", false);
+        out.put("pointsStored", points);
         out.put("message", reason);
         out.put("version", version);
         out.put("geometry", check);
@@ -169,6 +207,7 @@ public class DesignService {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("candidates", candidates);
         out.put("toolRadiusMm", radius);
+        out.put("canUndo", v.hasPreDogboneSnapshot());
         out.put("message", candidates == 0
                 ? "No sharp internal corners found"
                 : candidates + " sharp internal corner(s) can receive dog-bones");

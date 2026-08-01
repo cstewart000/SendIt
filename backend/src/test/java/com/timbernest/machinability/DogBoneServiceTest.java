@@ -15,9 +15,10 @@ class DogBoneServiceTest {
     private final DogBoneService svc = new DogBoneService();
 
     @Test
-    void dogboneIntoMaterialPreservesStraightEdges() {
+    void dogboneCentreOffsetVertexOnRimPreservesEdges() {
         GeometryModel m = lShape();
         Contour c = m.getContours().get(0);
+        Vec2 corner = new Vec2(40, 40);
 
         assertTrue(svc.countCandidates(m) >= 1);
         DogBoneService.Result r = svc.apply(m, tool(6), 1.0);
@@ -25,73 +26,68 @@ class DogBoneServiceTest {
         assertEquals(3.0, r.radiusMm(), 0.01);
 
         List<Vec2> pts = c.getPoints();
-        // Arc samples present (270° lobe needs many points)
-        assertTrue(pts.size() > 12, "size=" + pts.size());
+        assertTrue(pts.size() > 20, "size=" + pts.size());
 
-        // Into solid L (x<40 and y<40 near re-entrant corner)
-        assertTrue(pts.stream().anyMatch(p -> p.x() < 39 && p.y() < 39),
-                "dog-bone must cut into part material");
-        // Not into free space of L (the missing square)
+        // Original vertex still present (rim of the dog-bone circle)
+        assertTrue(containsNear(pts, corner, 0.05), "original vertex must remain on the circle rim");
+
+        // Into solid L (x<40 and y<40)
+        assertTrue(pts.stream().anyMatch(p -> p.x() < 38 && p.y() < 38),
+                "dog-bone body must sit in part material");
+        // Not into free space of L
         assertFalse(pts.stream().anyMatch(p -> p.x() > 42 && p.y() > 42),
                 "must not bulge into free space");
 
-        // Original non-corner vertices still present (outer edges intact)
+        // Original non-corner vertices still present
         assertTrue(containsNear(pts, new Vec2(0, 0), 0.05));
         assertTrue(containsNear(pts, new Vec2(100, 0), 0.05));
         assertTrue(containsNear(pts, new Vec2(100, 40), 0.05));
         assertTrue(containsNear(pts, new Vec2(40, 100), 0.05));
         assertTrue(containsNear(pts, new Vec2(0, 100), 0.05));
 
-        // Horizontal arm edge stays on y=40 for x>43 (beyond dog-bone setback)
-        assertTrue(pts.stream().anyMatch(p -> Math.abs(p.y() - 40) < 0.05 && p.x() > 45),
-                "horizontal edge beyond dog-bone must stay on y=40");
-        // Vertical arm edge stays on x=40 for y>43
-        assertTrue(pts.stream().anyMatch(p -> Math.abs(p.x() - 40) < 0.05 && p.y() > 45),
-                "vertical edge beyond dog-bone must stay on x=40");
-
-        // No original edge points bent off their lines (beyond setback zone)
-        for (Vec2 p : pts) {
-            if (Math.abs(p.y()) < 0.05) assertTrue(p.x() >= -0.05 && p.x() <= 100.05);
-            if (Math.abs(p.x() - 100) < 0.05) assertTrue(p.y() >= -0.05 && p.y() <= 40.05);
-            if (Math.abs(p.x()) < 0.05) assertTrue(p.y() >= -0.05 && p.y() <= 100.05);
-            if (Math.abs(p.y() - 100) < 0.05) assertTrue(p.x() >= -0.05 && p.x() <= 40.05);
-        }
+        // Straight edges beyond the corner still on original lines
+        assertTrue(pts.stream().anyMatch(p -> Math.abs(p.y() - 40) < 0.05 && p.x() > 50),
+                "horizontal edge must stay on y=40");
+        assertTrue(pts.stream().anyMatch(p -> Math.abs(p.x() - 40) < 0.05 && p.y() > 50),
+                "vertical edge must stay on x=40");
     }
 
     @Test
-    void arcEndpointsLieOnOriginalEdgesAndRadiusMatchesTool() {
+    void circlePassesThroughOriginalVertexCentreInMaterial() {
         List<Vec2> poly = List.of(
                 new Vec2(0, 0), new Vec2(100, 0), new Vec2(100, 40),
                 new Vec2(40, 40), new Vec2(40, 100), new Vec2(0, 100));
         Vec2 a = new Vec2(100, 40), b = new Vec2(40, 40), c = new Vec2(40, 100);
         double r = 3.0;
-        List<Vec2> arc = svc.dogboneArc(a, b, c, r, poly, false);
-        assertTrue(arc.size() >= 12, "samples=" + arc.size());
+        List<Vec2> lobe = svc.dogboneLobe(a, b, c, r, poly, false);
+        assertTrue(lobe.size() >= 20, "samples=" + lobe.size());
 
-        Vec2 t1 = arc.get(0), t2 = arc.get(arc.size() - 1);
-        // On horizontal edge y=40, setback r from corner
-        assertEquals(40.0, t1.y(), 1e-9);
-        assertEquals(40.0 + r, t1.x(), 1e-6);
-        // On vertical edge x=40, setback r from corner
-        assertEquals(40.0, t2.x(), 1e-9);
-        assertEquals(40.0 + r, t2.y(), 1e-6);
+        // Starts and ends at original vertex
+        assertEquals(0.0, lobe.get(0).dist(b), 1e-9);
+        assertEquals(0.0, lobe.get(lobe.size() - 1).dist(b), 1e-9);
 
-        // Classic dog-bone: every sample is at distance r from corner B
-        for (Vec2 p : arc) {
-            assertEquals(r, p.dist(b), 1e-5, "point " + p + " not on circle around corner");
+        // Infer centre as average of samples (≈ geometric centre for full circle)
+        double sx = 0, sy = 0;
+        for (Vec2 p : lobe) { sx += p.x(); sy += p.y(); }
+        Vec2 mean = new Vec2(sx / lobe.size(), sy / lobe.size());
+        // Centre must NOT be at the vertex
+        assertTrue(mean.dist(b) > r * 0.5, "centre must be offset from vertex; mean=" + mean);
+        // Centre must be in material
+        assertTrue(mean.x() < 40 && mean.y() < 40, "centre in material; mean=" + mean);
+        // Distance centre → vertex ≈ r (vertex on rim)
+        assertEquals(r, mean.dist(b), 0.15);
+
+        // Every sample on the circle of radius r about the centre
+        for (Vec2 p : lobe) {
+            assertEquals(r, p.dist(mean), 0.2, "off circle: " + p);
         }
 
-        // Curve (major arc) is much longer than the short free-space chord
-        double chord = t1.dist(t2);
-        double path = 0;
-        for (int i = 1; i < arc.size(); i++) path += arc.get(i - 1).dist(arc.get(i));
-        assertTrue(path > chord * 2.0,
-                "classic dog-bone is the long arc into material; path=" + path + " chord=" + chord);
-
-        // Mid sample deep in solid, not free space
-        Vec2 mid = arc.get(arc.size() / 2);
-        assertTrue(mid.x() < 40 && mid.y() < 40, "mid=" + mid);
-        assertEquals(r, mid.dist(b), 1e-5);
+        // Deep sample opposite the vertex is further into material
+        Vec2 deep = lobe.stream()
+                .max((p, q) -> Double.compare(p.dist(b), q.dist(b)))
+                .orElseThrow();
+        assertTrue(deep.x() < 40 && deep.y() < 40, "deep=" + deep);
+        assertEquals(2 * r, deep.dist(b), 0.35);
     }
 
     @Test
@@ -101,16 +97,11 @@ class DogBoneServiceTest {
         svc.apply(m, tool(6), 1.0);
         List<Vec2> pts = c.getPoints();
 
-        List<Vec2> bottom = pts.stream().filter(p -> Math.abs(p.y()) < 0.02).toList();
-        assertTrue(bottom.size() >= 2);
-        for (Vec2 p : bottom) assertEquals(0.0, p.y(), 0.02);
-
-        List<Vec2> right = pts.stream().filter(p -> Math.abs(p.x() - 100) < 0.02).toList();
-        assertTrue(right.size() >= 2);
-        for (Vec2 p : right) assertEquals(100.0, p.x(), 0.02);
-
         for (Vec2 p : pts) {
-            if (p.x() > 44 && p.x() < 99 && Math.abs(p.y() - 40) < 0.5) {
+            if (Math.abs(p.y()) < 0.02) assertEquals(0.0, p.y(), 0.02);
+            if (Math.abs(p.x() - 100) < 0.02) assertEquals(100.0, p.x(), 0.02);
+            // Horizontal arm y=40 for x well beyond corner / lobe
+            if (p.x() > 50 && p.x() < 99 && Math.abs(p.y() - 40) < 0.5) {
                 assertEquals(40.0, p.y(), 0.05, "bent off horizontal arm: " + p);
             }
         }
@@ -137,17 +128,13 @@ class DogBoneServiceTest {
         // Overcut into plate (outside the original hole square)
         assertTrue(hpts.stream()
                 .anyMatch(p -> p.x() < 49.5 || p.y() < 49.5 || p.x() > 150.5 || p.y() > 150.5),
-                "dog-bones must overcut into plate solid; pts=" + hpts);
+                "dog-bones must overcut into plate; pts count=" + hpts.size());
 
-        // Arc endpoints remain on the original hole edge lines
-        assertTrue(hpts.stream().anyMatch(p -> Math.abs(p.y() - 50) < 0.05),
-                "must retain points on original bottom edge y=50; pts=" + hpts);
-        assertTrue(hpts.stream().anyMatch(p -> Math.abs(p.x() - 50) < 0.05),
-                "must retain points on original left edge x=50; pts=" + hpts);
-        assertTrue(hpts.stream().anyMatch(p -> Math.abs(p.y() - 150) < 0.05),
-                "must retain points on original top edge y=150; pts=" + hpts);
-        assertTrue(hpts.stream().anyMatch(p -> Math.abs(p.x() - 150) < 0.05),
-                "must retain points on original right edge x=150; pts=" + hpts);
+        // Original hole corners remain (on circle rims)
+        assertTrue(containsNear(hpts, new Vec2(50, 50), 0.05));
+        assertTrue(containsNear(hpts, new Vec2(150, 50), 0.05));
+        assertTrue(containsNear(hpts, new Vec2(150, 150), 0.05));
+        assertTrue(containsNear(hpts, new Vec2(50, 150), 0.05));
     }
 
     private static boolean containsNear(List<Vec2> pts, Vec2 target, double eps) {

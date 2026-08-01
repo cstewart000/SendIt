@@ -45,8 +45,9 @@ export function DesignWizardPage() {
   const [busy, setBusy] = useState(false)
   const [dogToolId, setDogToolId] = useState<number | ''>('')
   const [dogScale, setDogScale] = useState(1.0)
-  const [dogPreview, setDogPreview] = useState<{ candidates: number; message: string } | null>(null)
+  const [dogPreview, setDogPreview] = useState<{ candidates: number; message: string; canUndo?: boolean } | null>(null)
   const [dogMsg, setDogMsg] = useState('')
+  const [canUndoDogbones, setCanUndoDogbones] = useState(false)
   const version = detail?.versions[0]
 
   async function reload() {
@@ -72,10 +73,11 @@ export function DesignWizardPage() {
   async function refreshDogPreview(versionId: number, toolId?: number) {
     try {
       const q = toolId ? `?toolId=${toolId}` : ''
-      const p = await api<{ candidates: number; message: string }>(
+      const p = await api<{ candidates: number; message: string; canUndo?: boolean }>(
         `/designs/${id}/versions/${versionId}/dogbones/preview${q}`,
       )
       setDogPreview(p)
+      setCanUndoDogbones(!!p.canUndo)
     } catch {
       setDogPreview(null)
     }
@@ -150,6 +152,7 @@ export function DesignWizardPage() {
         pointsBefore?: number
         pointsAfter?: number
         pointsStored?: number
+        canUndo?: boolean
         version?: Version
         geometry?: Version['geometry']
       }>(`/designs/${id}/versions/${version.id}/dogbones`, {
@@ -178,6 +181,7 @@ export function DesignWizardPage() {
         ? ` · model points ${res.pointsBefore ?? '?'}→${res.pointsStored}`
         : ''
       setDogMsg((res.message || `Added ${res.dogBonesAdded} dog-bone(s)`) + ptsNote)
+      setCanUndoDogbones(res.canUndo !== false)
       // Full reload from API to confirm geometryJson round-trip
       const d = await reload()
       if (d.versions[0]) {
@@ -187,6 +191,46 @@ export function DesignWizardPage() {
       console.log('[wizard] dogbones applied', res.dogBonesAdded, 'points', res.pointsBefore, '→', res.pointsStored)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Dog-bone apply failed')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function undoDogbones() {
+    if (!version) return
+    setBusy(true)
+    setError('')
+    setDogMsg('')
+    try {
+      const res = await api<{
+        message: string
+        canUndo?: boolean
+        pointsStored?: number
+        version?: Version
+        geometry?: Version['geometry']
+      }>(`/designs/${id}/versions/${version.id}/dogbones/undo`, { method: 'POST' })
+      if (res.version || res.geometry) {
+        setDetail(prev => {
+          if (!prev) return prev
+          const vs = prev.versions.map(v => {
+            if (v.id !== version.id) return v
+            const merged = { ...v, ...(res.version || {}) }
+            if (res.geometry) merged.geometry = res.geometry
+            if (res.version?.geometry) merged.geometry = res.version.geometry
+            return merged
+          })
+          return { ...prev, versions: vs }
+        })
+      }
+      setDogMsg(res.message || 'Dog-bones undone')
+      setCanUndoDogbones(false)
+      const d = await reload()
+      if (d.versions[0]) {
+        await loadParts(d.versions[0].id)
+        await refreshDogPreview(d.versions[0].id, dogToolId === '' ? undefined : Number(dogToolId))
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Undo dog-bones failed')
     } finally {
       setBusy(false)
     }
@@ -291,7 +335,8 @@ export function DesignWizardPage() {
               <div className="panel" style={{ padding: '0.85rem', border: '1px solid var(--line)', marginTop: 4 }}>
                 <h3 style={{ marginTop: 0 }}>Dog-bones</h3>
                 <p className="muted" style={{ margin: '0 0 0.6rem', fontSize: '0.88rem' }}>
-                  Add clearance notches at sharp internal corners so a round endmill can fully machine the corner.
+                  Circular clearance at sharp internal corners. The circle centre is offset into the material
+                  so the original corner sits on the rim (Fusion-style); straight edges stay unchanged.
                 </p>
                 {dogPreview && (
                   <p className="muted" style={{ margin: '0 0 0.6rem' }}>
@@ -325,11 +370,11 @@ export function DesignWizardPage() {
                 </label>
                 {selectedTool && (
                   <p className="muted" style={{ margin: 0, fontSize: '0.85rem' }}>
-                    Notch radius ≈ <strong>{dogRadius.toFixed(2)} mm</strong>
+                    Circle radius ≈ <strong>{dogRadius.toFixed(2)} mm</strong>
                     {' '}(½ × Ø{selectedTool.diameterMm} × {dogScale})
                   </p>
                 )}
-                <div className="row" style={{ marginTop: 8 }}>
+                <div className="row" style={{ marginTop: 8, flexWrap: 'wrap', gap: 8 }}>
                   <button
                     type="button"
                     disabled={busy || dogToolId === '' || (dogPreview?.candidates ?? 0) === 0}
@@ -337,6 +382,15 @@ export function DesignWizardPage() {
                   >
                     Apply dog-bones
                     {dogPreview && dogPreview.candidates > 0 ? ` (${dogPreview.candidates})` : ''}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={busy || !canUndoDogbones}
+                    onClick={undoDogbones}
+                    title={canUndoDogbones ? 'Restore geometry from before dog-bones' : 'Nothing to undo'}
+                  >
+                    Undo dog-bones
                   </button>
                   <button
                     type="button"

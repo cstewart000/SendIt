@@ -15,6 +15,9 @@ public class DesignVersion {
     private String repairedPath;
     @Column(columnDefinition = "TEXT")
     private String geometryJson;
+    /** Geometry snapshot taken immediately before the last dog-bone apply (for undo). */
+    @Column(columnDefinition = "TEXT")
+    private String preDogboneGeometryJson;
     @Column(columnDefinition = "TEXT")
     private String issuesJson = "[]";
     private boolean analysed;
@@ -35,6 +38,13 @@ public class DesignVersion {
     public void setRepairedPath(String repairedPath) { this.repairedPath = repairedPath; }
     public String getGeometryJson() { return geometryJson; }
     public void setGeometryJson(String geometryJson) { this.geometryJson = geometryJson; }
+    public String getPreDogboneGeometryJson() { return preDogboneGeometryJson; }
+    public void setPreDogboneGeometryJson(String preDogboneGeometryJson) {
+        this.preDogboneGeometryJson = preDogboneGeometryJson;
+    }
+    public boolean hasPreDogboneSnapshot() {
+        return preDogboneGeometryJson != null && !preDogboneGeometryJson.isBlank();
+    }
     public String getIssuesJson() { return issuesJson; }
     public void setIssuesJson(String issuesJson) { this.issuesJson = issuesJson; }
     public boolean isAnalysed() { return analysed; }
