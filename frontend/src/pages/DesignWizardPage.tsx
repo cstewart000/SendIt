@@ -7,7 +7,7 @@ import { Viewer2D } from '../components/viewer2d/Viewer2D'
 import { Viewer3D } from '../components/viewer3d/Viewer3D'
 
 type Version = {
-  id: number; analysed: boolean; partCount?: number; originalFilename?: string
+  id: number; analysed: boolean; repaired?: boolean; partCount?: number; originalFilename?: string
   geometry?: { contours: { id?: string; closed?: boolean; points: { x: number; y: number }[] }[] }
   issues?: { id: string; category: string; severity: string; message: string; highlight?: { x: number; y: number }[] }[]
 }
@@ -147,6 +147,11 @@ export function DesignWizardPage() {
         dogBonesAdded: number
         radiusMm: number
         message: string
+        pointsBefore?: number
+        pointsAfter?: number
+        pointsStored?: number
+        version?: Version
+        geometry?: Version['geometry']
       }>(`/designs/${id}/versions/${version.id}/dogbones`, {
         method: 'POST',
         body: JSON.stringify({
@@ -155,12 +160,31 @@ export function DesignWizardPage() {
           confirm: true,
         }),
       })
-      setDogMsg(res.message || `Added ${res.dogBonesAdded} dog-bone(s)`)
+      // Immediately patch local model so viewers update without waiting for reload
+      if (res.version || res.geometry) {
+        setDetail(prev => {
+          if (!prev) return prev
+          const vs = prev.versions.map(v => {
+            if (v.id !== version.id) return v
+            const merged = { ...v, ...(res.version || {}) }
+            if (res.geometry) merged.geometry = res.geometry
+            if (res.version?.geometry) merged.geometry = res.version.geometry
+            return merged
+          })
+          return { ...prev, versions: vs }
+        })
+      }
+      const ptsNote = res.pointsStored != null
+        ? ` · model points ${res.pointsBefore ?? '?'}→${res.pointsStored}`
+        : ''
+      setDogMsg((res.message || `Added ${res.dogBonesAdded} dog-bone(s)`) + ptsNote)
+      // Full reload from API to confirm geometryJson round-trip
       const d = await reload()
       if (d.versions[0]) {
         await loadParts(d.versions[0].id)
         await refreshDogPreview(d.versions[0].id, Number(dogToolId))
       }
+      console.log('[wizard] dogbones applied', res.dogBonesAdded, 'points', res.pointsBefore, '→', res.pointsStored)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Dog-bone apply failed')
     } finally {
@@ -222,6 +246,12 @@ export function DesignWizardPage() {
   const issues = step >= 2 ? machIssues : version?.issues || []
   const selectedTool = catalog?.tools.find(t => t.id === dogToolId)
   const dogRadius = selectedTool ? (selectedTool.diameterMm / 2) * dogScale : 0
+  // Force viewers to remount when geometry topology changes (e.g. dog-bones)
+  const geoKey = useMemo(() => {
+    const cs = highlight.length ? highlight : contours
+    const n = cs.reduce((a, c) => a + (c.points?.length || 0), 0)
+    return `${version?.id || 0}-${cs.length}-${n}-${version?.repaired ? 1 : 0}`
+  }, [version?.id, version?.repaired, contours, highlight])
 
   return (
     <Shell>
@@ -234,13 +264,14 @@ export function DesignWizardPage() {
       <div className="grid two">
         <div className="panel">
           <h2>{detail?.name || 'Design'}</h2>
-          <Viewer2D contours={highlight.length ? highlight : contours} issues={issues} />
+          <Viewer2D key={`2d-${geoKey}`} contours={highlight.length ? highlight : contours} issues={issues} />
           <div style={{ marginTop: '1rem' }}>
             <p className="muted" style={{ margin: '0 0 0.4rem', fontSize: '0.85rem' }}>
               3D: drag rotate · right-drag pan · scroll zoom
               {partsFor3d.length > 0 ? ` · ${partsFor3d.length} part(s)` : ''}
             </p>
             <Viewer3D
+              key={`3d-${geoKey}`}
               parts={partsFor3d.length ? partsFor3d : undefined}
               contours={partsFor3d.length ? undefined : contours}
             />

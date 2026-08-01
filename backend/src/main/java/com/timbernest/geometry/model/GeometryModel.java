@@ -13,6 +13,9 @@ public class GeometryModel {
     public List<Contour> getContours() { return contours; }
     public void setContours(List<Contour> contours) { this.contours = contours; }
     public List<String> getPurgedLayers() { return purgedLayers; }
+    public void setPurgedLayers(List<String> purgedLayers) {
+        this.purgedLayers = purgedLayers != null ? purgedLayers : new java.util.ArrayList<>();
+    }
 
     public double[] bbox() {
         double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE;

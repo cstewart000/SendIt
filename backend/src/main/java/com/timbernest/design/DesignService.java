@@ -1,20 +1,26 @@
 package com.timbernest.design;
 
+import com.timbernest.admin.Tool;
+import com.timbernest.admin.ToolRepository;
 import com.timbernest.common.ApiException;
 import com.timbernest.geometry.ContourJoiner;
 import com.timbernest.geometry.GeometryAnalyser;
 import com.timbernest.geometry.GeometryRepairer;
 import com.timbernest.geometry.JsonUtil;
 import com.timbernest.geometry.model.GeometryModel;
+import com.timbernest.machinability.DogBoneService;
 import com.timbernest.storage.FileStorageService;
 import com.timbernest.user.AppUser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 public class DesignService {
@@ -29,15 +35,18 @@ public class DesignService {
     private final JsonUtil json;
     private final DesignAccess access;
     private final DesignPartSync partSync;
+    private final DogBoneService dogBones;
+    private final ToolRepository tools;
 
     public DesignService(DesignRepository designs, DesignVersionRepository versions,
                          DesignPartRepository designParts, RepairActionLogRepository repairLogs,
                          FileStorageService storage, GeometryAnalyser analyser,
                          GeometryRepairer repairer, JsonUtil json, DesignAccess access,
-                         DesignPartSync partSync) {
+                         DesignPartSync partSync, DogBoneService dogBones, ToolRepository tools) {
         this.designs = designs; this.versions = versions; this.designParts = designParts;
         this.repairLogs = repairLogs; this.storage = storage; this.analyser = analyser;
         this.repairer = repairer; this.json = json; this.access = access; this.partSync = partSync;
+        this.dogBones = dogBones; this.tools = tools;
     }
 
     public List<DesignDtos.DesignSummary> list(AppUser user) {
@@ -93,6 +102,7 @@ public class DesignService {
         return toVersion(v);
     }
 
+    @Transactional
     public DesignDtos.VersionDto repair(AppUser user, Long designId, Long versionId,
                                        String action, boolean confirm) {
         if (!confirm) throw new ApiException(HttpStatus.BAD_REQUEST, "Repair must be confirmed");
@@ -101,15 +111,88 @@ public class DesignService {
         ContourJoiner.joinAdaptive(model);
         String reason = repairer.apply(model, action);
         ContourJoiner.joinAdaptive(model);
+        return persistRepaired(v, model, action, reason);
+    }
+
+    /**
+     * Apply dog-bones to sharp internal corners, save geometryJson + design parts, re-analyse.
+     */
+    @Transactional
+    public Map<String, Object> applyDogbones(AppUser user, Long designId, Long versionId,
+                                             Long toolId, double scale, boolean confirm) {
+        if (!confirm) throw new ApiException(HttpStatus.BAD_REQUEST, "Dog-bones must be confirmed");
+        if (toolId == null) throw new ApiException(HttpStatus.BAD_REQUEST, "toolId required");
+        DesignVersion v = access.ownedVersion(user, designId, versionId);
+        GeometryModel model = access.loadOrParse(v);
+        Tool tool = tools.findById(toolId)
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "tool not found"));
+
+        int before = dogBones.countCandidates(model);
+        int pointsBefore = model.getContours().stream().mapToInt(c -> c.getPoints().size()).sum();
+        DogBoneService.Result r = dogBones.apply(model, tool, scale);
+        int pointsAfter = model.getContours().stream().mapToInt(c -> c.getPoints().size()).sum();
+
+        String reason = String.format("Dog-bones at %d corner(s), radius %.2f mm (tool %s ×%.2f)",
+                r.corners(), r.radiusMm(), tool.getName(), scale);
+        DesignDtos.VersionDto version = persistRepaired(v, model, "DOGBONES", reason);
+
+        // Verify round-trip from DB
+        DesignVersion reloaded = versions.findById(v.getId()).orElseThrow();
+        GeometryModel check = json.toModel(reloaded.getGeometryJson());
+        int pointsStored = check.getContours().stream().mapToInt(c -> c.getPoints().size()).sum();
+        log.info("Dog-bones version {} corners={} points {}→{} stored={}",
+                v.getId(), r.corners(), pointsBefore, pointsAfter, pointsStored);
+        if (r.corners() > 0 && pointsStored <= pointsBefore) {
+            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Dog-bones did not persist into geometryJson");
+        }
+
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("dogBonesAdded", r.corners());
+        out.put("radiusMm", r.radiusMm());
+        out.put("candidatesBefore", before);
+        out.put("pointsBefore", pointsBefore);
+        out.put("pointsAfter", pointsAfter);
+        out.put("pointsStored", pointsStored);
+        out.put("message", reason);
+        out.put("version", version);
+        out.put("geometry", check);
+        return out;
+    }
+
+    public Map<String, Object> dogbonePreview(AppUser user, Long designId, Long versionId, Long toolId) {
+        DesignVersion v = access.ownedVersion(user, designId, versionId);
+        GeometryModel model = access.loadOrParse(v);
+        int candidates = dogBones.countCandidates(model);
+        double radius = tools.findById(toolId == null ? -1L : toolId)
+                .map(t -> t.getDiameterMm() / 2.0).orElse(3.0);
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("candidates", candidates);
+        out.put("toolRadiusMm", radius);
+        out.put("message", candidates == 0
+                ? "No sharp internal corners found"
+                : candidates + " sharp internal corner(s) can receive dog-bones");
+        return out;
+    }
+
+    private DesignDtos.VersionDto persistRepaired(DesignVersion v, GeometryModel model,
+                                                  String action, String reason) {
         v.setGeometryJson(json.toJson(model));
         v.setIssuesJson(json.toJson(analyser.analyse(model)));
         v.setRepaired(true);
+        v.setAnalysed(true);
         v.setRepairedPath(storage.writeText("repaired", "v" + v.getId() + ".json", v.getGeometryJson()));
-        versions.save(v);
-        partSync.sync(v.getId(), model);
-        repairLogs.save(RepairActionLog.of(v.getId(), action, reason));
-        log.info("Repair {} on version {}: {}", action, v.getId(), reason);
-        return toVersion(v);
+        DesignVersion saved = versions.saveAndFlush(v);
+        partSync.sync(saved.getId(), model);
+        repairLogs.save(RepairActionLog.of(saved.getId(), action, reason));
+        // Touch parent design so list views refresh
+        designs.findById(saved.getDesignId()).ifPresent(d -> {
+            d.touch();
+            designs.save(d);
+        });
+        log.info("Persisted repaired geometry version {} action={} reason={}",
+                saved.getId(), action, reason);
+        return toVersion(saved);
     }
 
     public List<DesignDtos.PartDto> listParts(AppUser user, Long designId, Long versionId) {
